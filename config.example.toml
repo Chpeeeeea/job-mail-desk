@@ -1,0 +1,27 @@
+[mail]
+host = "imap.qq.com"
+port = 993
+folder = "INBOX"
+lookback_days = 3
+poll_minutes = 10
+
+[schedule]
+hourly_minute = 0
+digest_times = ["08:00", "13:00", "20:00"]
+timezone = "Asia/Shanghai"
+
+[obsidian]
+enabled = false
+output_path = ""
+include_sender = false
+include_private_links = false
+
+[research]
+enabled = true
+queue_path = ""
+
+[ui]
+width = 390
+height = 620
+always_on_top = true
+start_hidden = false

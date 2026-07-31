@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "job-mail-desk"
+version = "0.2.0"
+description = "Privacy-first, Markdown-native job email desk."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+dependencies = [
+  "apscheduler>=3.11,<4",
+  "keyring>=25.7,<26",
+  "pillow>=11,<13",
+  "pystray>=0.19,<1",
+  "pywebview>=5,<7",
+  "pyyaml>=6,<7",
+  "tzdata>=2026.1",
+]
+
+[project.scripts]
+jobmaildesk = "job_mail_desk.cli:main"
+
+[dependency-groups]
+dev = [
+  "pyinstaller>=6.18,<7",
+  "pytest>=9,<10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+job_mail_desk = ["ui/*.html", "ui/*.css", "ui/*.js"]
