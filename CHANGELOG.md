@@ -15,6 +15,7 @@ JobMailDesk 使用语义化版本号。每个可验证阶段必须先更新本�
 ### Changed
 
 - 发布工作流和Windows打包脚本从项目元数据读取版本，避免多处手工修改资产名。
+- GitHub Actions升级到Node.js 24运行时的官方主版本，消除Node.js 20弃用警告；Release下载同时启用新版本默认的artifact digest强校验。
 - Core仍不依赖GitHub运行；更新请求可关闭，网络失败不会阻塞邮件、任务、日历或Obsidian。
 
 ## [0.3.0] - 2026-08-01
