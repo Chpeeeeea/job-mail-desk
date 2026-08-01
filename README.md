@@ -1,11 +1,19 @@
+<div align="center">
+
 # JobMailDesk
 
-把招聘邮件整理成桌面待办、求职进展和 Markdown 日历。
+**把招聘邮件整理成桌面待办、求职进展和 Markdown 日历。**
 
+[![Release](https://img.shields.io/github/v/release/Chpeeeeea/job-mail-desk?include_prereleases&label=release&color=c25d3d)](https://github.com/Chpeeeeea/job-mail-desk/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-557962)](#下载安装)
+[![Python](https://img.shields.io/badge/runtime-Python%203.12-3776ab)](pyproject.toml)
+[![UI](https://img.shields.io/badge/UI-pywebview-6f6259)](https://pywebview.flowrl.com/)
 [![Build](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml/badge.svg)](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml)
-[![Release](https://img.shields.io/badge/release-v0.4.1_preview-c25d3d)](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.1)
-[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-557962)](#下载安装)
-[![License](https://img.shields.io/badge/license-MIT-25231f)](LICENSE)
+[![License](https://img.shields.io/github/license/Chpeeeeea/job-mail-desk?color=25231f)](LICENSE)
+
+[下载 v0.4.1](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.1) · [使用文档](#下载安装) · [隐私边界](#隐私边界) · [更新日志](CHANGELOG.md)
+
+</div>
 
 JobMailDesk Core 是一个隐私优先、Markdown 原生的求职邮件工作台。它只读扫描 QQ 邮箱，在本机识别公司、岗位、招聘阶段和时间节点，再生成可编辑的桌面卡片、周历、月历与可选的 Obsidian 待办。
 
