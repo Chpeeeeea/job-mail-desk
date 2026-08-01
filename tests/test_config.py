@@ -5,6 +5,8 @@ def test_core_defaults_do_not_require_obsidian_or_research() -> None:
     settings = Settings()
     assert settings.obsidian_enabled is False
     assert settings.research_enabled is False
+    assert settings.updates_enabled is True
+    assert settings.update_channel == "preview"
 
 
 def test_settings_round_trip_paths_and_intervals(tmp_path) -> None:
@@ -19,6 +21,8 @@ def test_settings_round_trip_paths_and_intervals(tmp_path) -> None:
             "progress_enabled": True,
             "progress_output": str(tmp_path / "进展.md"),
             "progress_source": str(tmp_path / "台账.md"),
+            "updates_enabled": False,
+            "update_channel": "stable",
         },
     )
     config = tmp_path / "config.toml"
@@ -30,3 +34,5 @@ def test_settings_round_trip_paths_and_intervals(tmp_path) -> None:
     assert loaded.progress_output == tmp_path / "进展.md"
     assert loaded.progress_source == tmp_path / "台账.md"
     assert loaded.research_enabled is False
+    assert loaded.updates_enabled is False
+    assert loaded.update_channel == "stable"

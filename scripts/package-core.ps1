@@ -1,12 +1,18 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$ExePath,
-    [string]$Version = "0.3.0",
+    [string]$Version = "",
     [string]$OutputDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$acceptancePath = ""
+if (-not $Version) {
+    $Version = (& uv run --project $projectRoot python -c "from job_mail_desk import __version__; print(__version__)").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $Version) { throw "Unable to determine package version" }
+}
+$acceptancePath = Join-Path $projectRoot "docs\ACCEPTANCE_v$Version.md"
 $resolvedExe = [System.IO.Path]::GetFullPath($ExePath)
 if (-not (Test-Path -LiteralPath $resolvedExe -PathType Leaf)) {
     throw "JobMailDesk.exe not found: $resolvedExe"
@@ -32,7 +38,9 @@ try {
     # decode UTF-8-without-BOM source files using the active ANSI code page.
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\CORE_QUICKSTART.md") -Destination (Join-Path $packageRoot "QUICKSTART.zh-CN.md")
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\DEPENDENCIES.md") -Destination (Join-Path $packageRoot "DEPENDENCIES.zh-CN.md")
-    Copy-Item -LiteralPath (Join-Path $projectRoot "docs\ACCEPTANCE_v0.3.0.md") -Destination (Join-Path $packageRoot "ACCEPTANCE.zh-CN.md")
+    if (Test-Path -LiteralPath $acceptancePath) {
+        Copy-Item -LiteralPath $acceptancePath -Destination (Join-Path $packageRoot "ACCEPTANCE.zh-CN.md")
+    }
     Copy-Item -LiteralPath (Join-Path $projectRoot "CHANGELOG.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $projectRoot "PRIVACY.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $projectRoot "LICENSE") -Destination $packageRoot

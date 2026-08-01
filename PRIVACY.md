@@ -14,3 +14,10 @@ JobMailDesk is local-first.
   identifiers, private links, and email body text.
 - Obsidian export is optional. Sender and private-link export are disabled by
   default because a chosen vault may sync to a cloud provider.
+- Optional update checks send one unauthenticated HTTPS request to the public
+  GitHub Releases API at most once every 24 hours. GitHub can observe the
+  request IP address and JobMailDesk version in the User-Agent. No email,
+  task, credential, local path, or Obsidian content is included.
+- The application displays release notes and opens this project's public
+  GitHub Release page. It does not automatically download or install updates.
+  Disabling automatic checks does not affect email scanning or local tasks.

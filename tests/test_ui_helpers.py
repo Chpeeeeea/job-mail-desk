@@ -106,6 +106,8 @@ def test_desktop_bridge_has_no_public_native_window() -> None:
     api = DesktopApi(Settings())
     assert not hasattr(api, "window")
     assert not hasattr(api, "settings")
+    assert not hasattr(api, "download_update")
+    assert not hasattr(api, "install_update")
 
 
 def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
@@ -124,7 +126,11 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert '>邮件链接<' in html
     assert 'id="settingsDialog"' in html
     assert 'id="createProgressTemplate"' in html
+    assert 'id="checkUpdates"' in html
+    assert 'id="openUpdateRelease"' in html
+    assert 'id="updateBanner"' in html
     assert 'window.openSettingsDialog = showSettingsDialog' in javascript
+    assert 'window.checkForUpdates = checkForUpdates' in javascript
     assert 'new Set(["toggle_done", "snooze", "ignore"])' in javascript
     assert 'button.textContent = "再点确认"' in javascript
     assert 'document.createElement("details")' in javascript
