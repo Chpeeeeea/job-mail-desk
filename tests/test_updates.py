@@ -87,6 +87,7 @@ def test_release_asset_must_come_from_project_repository() -> None:
         )
 
 def test_daily_check_restores_cached_available_release(monkeypatch) -> None:
+    monkeypatch.setattr("job_mail_desk.updates.__version__", "0.4.0")
     descriptor = find_update(
         current_version="0.4.0",
         releases=[_release("0.4.1")],

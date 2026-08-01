@@ -789,6 +789,20 @@ dialog::backdrop {
 
 .update-actions button {
   flex: 1 1 120px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.update-actions button:disabled {
+  cursor: default;
+  opacity: 0.52;
 }
 
 .update-status {

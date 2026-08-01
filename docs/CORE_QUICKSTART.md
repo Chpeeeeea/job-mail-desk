@@ -2,7 +2,7 @@
 
 ## 安装
 
-1. Windows下载 `JobMailDesk-Core-v0.4.0-win-x64.zip`；Apple Silicon Mac下载`macos-arm64`，Intel Mac下载`macos-x64`。
+1. Windows下载 `JobMailDesk-Core-v0.4.1-win-x64.zip`；Apple Silicon Mac下载`macos-arm64`，Intel Mac下载`macos-x64`。
 2. 解压后启动 `JobMailDesk.exe` 或把 `JobMailDesk.app` 拖入“应用程序”再打开。
 3. 先核对文件来自本项目GitHub Release及SHA256校验值。未签名的Mac预览包首次打开时需在“系统设置 → 隐私与安全性”确认。
 

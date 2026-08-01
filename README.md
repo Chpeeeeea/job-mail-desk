@@ -2,7 +2,7 @@
 
 JobMailDesk 是一个隐私优先、Markdown 原生的 Windows / macOS 求职邮件工作台。它只读扫描 IMAP 邮箱，将招聘通知整理为本地任务、周/月日历和可选的 Obsidian 待办。
 
-> 当前版本：v0.4.0 Core 预览版。公开仓库仅包含匿名源码；真实邮件、本地任务、凭据和私人链接始终留在本机。
+> 当前版本：v0.4.1 Core 预览版。公开仓库仅包含匿名源码；真实邮件、本地任务、凭据和私人链接始终留在本机。
 
 版本演进与阶段性修复见 [CHANGELOG.md](CHANGELOG.md)。项目规定每个已验收阶段都必须先更新 Changelog，再形成独立提交并推送 GitHub。
 
@@ -29,7 +29,7 @@ JobMailDesk Core 完全在本机运行，不使用大模型、不需要API Key�
 - 可选创建规范的手动进展台账模板。
 - 可选每天检查一次更新，并选择预览版或稳定版通道。
 
-详细步骤见 [Core快速开始](docs/CORE_QUICKSTART.md)、[版本通知与手动更新](docs/UPDATES.md)、[依赖说明](docs/DEPENDENCIES.md)、[发布检查清单](docs/RELEASE_CHECKLIST.md) 与 [v0.4.0验收记录](docs/ACCEPTANCE_v0.4.0.md)。
+详细步骤见 [Core快速开始](docs/CORE_QUICKSTART.md)、[版本通知与手动更新](docs/UPDATES.md)、[依赖说明](docs/DEPENDENCIES.md)、[发布检查清单](docs/RELEASE_CHECKLIST.md) 与 [v0.4.1验收记录](docs/ACCEPTANCE_v0.4.1.md)。
 
 ## 核心边界
 
