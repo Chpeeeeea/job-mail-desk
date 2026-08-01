@@ -28,7 +28,7 @@ JobMailDesk Core 完全在本机运行，不使用大模型、不需要API Key�
 - 可选生成求职进展文档。
 - 可选创建规范的手动进展台账模板。
 
-详细步骤见 [Core快速开始](docs/CORE_QUICKSTART.md)、[依赖说明](docs/DEPENDENCIES.md) 与 [v0.3.0验收记录](docs/ACCEPTANCE_v0.3.0.md)。
+详细步骤见 [Core快速开始](docs/CORE_QUICKSTART.md)、[依赖说明](docs/DEPENDENCIES.md)、[发布检查清单](docs/RELEASE_CHECKLIST.md) 与 [v0.3.0验收记录](docs/ACCEPTANCE_v0.3.0.md)。
 
 ## 核心边界
 

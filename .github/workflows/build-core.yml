@@ -65,6 +65,8 @@ jobs:
           if [ "$built_app" != "packaging/macos/dist/JobMailDesk.app" ]; then
             mv "$built_app" packaging/macos/dist/JobMailDesk.app
           fi
+          plutil -lint packaging/macos/dist/JobMailDesk.app/Contents/Info.plist
+          test -n "$(find packaging/macos/dist/JobMailDesk.app/Contents/MacOS -type f -perm -111 -print -quit)"
           mkdir -p release
           ditto -c -k --sequesterRsrc --keepParent packaging/macos/dist/JobMailDesk.app "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip"
           shasum -a 256 "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip" > "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip.sha256"
@@ -75,3 +77,31 @@ jobs:
             release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip
             release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip.sha256
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - windows-x64
+      - macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="docs/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
+          test -f "$notes"
+          test "$(find release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 6
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "JobMailDesk Core $GITHUB_REF_NAME" \
+            --notes-file "$notes" \
+            --prerelease \
+            --verify-tag

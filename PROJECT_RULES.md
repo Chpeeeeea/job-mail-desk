@@ -44,6 +44,8 @@ jobmaildesk task-update <稳定任务ID> [字段参数]
 
 - Windows包使用PyInstaller，启用Per-Monitor DPI v2。
 - macOS包使用py2app，在真实macOS Runner分别生成arm64与Intel产物。
+- 只有 Pull Request 的 Windows x64、macOS Apple Silicon、macOS Intel 检查全部通过后才能合并并创建版本标签；标签必须对应 `docs/RELEASE_NOTES_vX.Y.Z.md`。
+- 标签构建必须自动发布三个平台 ZIP 及各自 SHA-256，共六个资产；当前未签名、公证或未完成三天试运行的版本必须标记为 prerelease。
 - 发布前必须通过测试、秘密扫描、正常启动、缓存启动、正常退出、Obsidian往返同步和解析回归。
 - 每个可验证的阶段性进展都必须更新`CHANGELOG.md`；禁止只有代码提交而没有面向用户的变更记录。
 - 阶段验收通过后应形成独立、可回滚的Git提交并推送到GitHub，不把多个完成阶段长期积压在本地工作树。

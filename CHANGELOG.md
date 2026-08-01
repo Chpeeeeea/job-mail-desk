@@ -4,6 +4,7 @@ JobMailDesk 使用语义化版本号。每个可验证阶段必须先更新本�
 
 ## [Unreleased]
 
+- 版本标签构建在三个平台全部成功后自动创建 GitHub prerelease，并上传 Windows x64、macOS Apple Silicon、macOS Intel 的 ZIP 与 SHA-256；缺少对应版本 Release Notes 时拒绝发布。
 - GitHub Actions在指向`main`的Pull Request中自动运行Windows与macOS双架构构建，确保首次引入工作流时也能完成远端验收。
 - 将py2app配置隔离到`packaging/macos/`，避免根目录PEP 621依赖被映射为py2app已禁止的`install_requires`。
 - 将PyInstaller限定为Windows开发依赖，并从macOS包显式排除，避免py2app误收集Windows构建工具及其可选Qt hooks。
