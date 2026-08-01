@@ -15,6 +15,7 @@
 - 系统级单实例锁，快速重复点击不会启动第二套扫描器。
 - Windows高DPI Per-Monitor v2与macOS Retina渲染。
 - GitHub Actions生成Windows x64、macOS arm64与macOS Intel包。
+- 每个平台同时提供 SHA-256 校验文件；版本标签构建通过后自动创建 GitHub prerelease。
 
 ## Core边界
 
@@ -29,3 +30,10 @@
 - 尚未进行Windows代码签名或Apple公证，系统可能显示来源提醒。
 - 规则解析无法保证覆盖所有招聘邮件模板；不确定内容进入待确认。
 - 当前只配置一个IMAP邮箱账号。
+
+## 下载选择
+
+- Windows 10/11 x64：`JobMailDesk-Core-v0.3.0-win-x64.zip`。
+- Apple Silicon Mac：`JobMailDesk-Core-v0.3.0-macos-arm64.zip`。
+- Intel Mac：`JobMailDesk-Core-v0.3.0-macos-x64.zip`。
+- 下载后可用同名 `.sha256` 文件核验完整性。
