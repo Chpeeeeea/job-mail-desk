@@ -11,6 +11,7 @@ APP = [str(PROJECT_ROOT / "launcher.py")]
 OPTIONS = {
     "argv_emulation": False,
     "packages": ["job_mail_desk", "keyring.backends.macOS", "webview"],
+    "excludes": ["PyInstaller"],
     "plist": {
         "CFBundleName": "JobMailDesk Core",
         "CFBundleDisplayName": "JobMailDesk Core",
