@@ -9,6 +9,7 @@ from job_mail_desk.research import (
     close_requests_for_task,
     pending_requests,
     queue_request,
+    request_states,
 )
 
 
@@ -80,3 +81,27 @@ def test_completed_task_closes_pending_research(tmp_path) -> None:
     assert len(pending_requests(queue)) == 1
     assert close_requests_for_task(queue, item.id, reason="task_status:done") == 1
     assert pending_requests(queue) == []
+
+
+def test_research_request_is_idempotent_across_later_scans(tmp_path) -> None:
+    item = task()
+    request = build_request(item)
+    assert request is not None
+    queue = tmp_path / "queue.jsonl"
+    assert queue_request(request, queue)
+    assert not queue_request(request, queue)
+    assert len(queue.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_research_state_exposes_completed_result(tmp_path) -> None:
+    item = task()
+    request = build_request(item)
+    assert request is not None
+    payload = request.to_dict()
+    payload["status"] = "completed"
+    payload["result_path"] = "D:/research/研究草稿.md"
+    queue = tmp_path / "queue.jsonl"
+    queue.write_text(__import__("json").dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+    state = request_states(queue)[item.id]
+    assert state["status"] == "completed"
+    assert state["result_path"].endswith("研究草稿.md")

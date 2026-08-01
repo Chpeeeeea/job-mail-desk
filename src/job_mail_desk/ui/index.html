@@ -7,36 +7,36 @@
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
-    <div class="drag-strip pywebview-drag-region" title="拖动纸片"></div>
-    <header class="topbar">
-      <div>
+    <header class="topbar native-drag pywebview-drag-region" title="按住空白处拖动窗口">
+      <div class="brand">
         <div class="eyebrow">LOCAL JOB DESK</div>
         <h1>求职纸片</h1>
       </div>
       <div class="top-actions">
         <button id="addButton" class="icon-button" title="新建任务">＋</button>
+        <button id="settingsButton" class="icon-button" title="设置">⚙</button>
         <button id="capsuleButton" class="icon-button" title="胶囊模式">▯</button>
         <button id="scanButton" class="icon-button" title="立即扫描">↻</button>
       </div>
     </header>
 
     <section id="capsuleView" class="capsule-view">
-      <button id="expandButton" title="展开 JobMailDesk">
+      <button id="expandButton" title="点击展开">
         <span class="capsule-mark">J</span>
-        <strong id="capsuleTime">--:--</strong>
-        <span id="capsuleCompany">暂无任务</span>
-        <small>点击展开</small>
+        <strong id="capsuleCount">0</strong>
       </button>
+      <div class="capsule-drag native-drag pywebview-drag-region" title="按住拖动"></div>
     </section>
 
     <section id="urgentStrip" class="urgent-strip hidden"></section>
 
     <nav class="tabs" aria-label="任务视图">
       <button class="tab active" data-view="today">今天 <span id="countToday">0</span></button>
+      <button class="tab" data-view="progress" title="按企业查看笔试、面试与轮次进展">进展 <span id="countProgress">0</span></button>
       <button class="tab" data-view="week">周历 <span id="countWeek">0</span></button>
       <button class="tab" data-view="month">月历 <span id="countMonth">0</span></button>
       <button class="tab" data-view="review">待确认 <span id="countReview">0</span></button>
-      <button class="tab" data-view="research">研究 <span id="countResearch">0</span></button>
+      <button class="tab" data-view="list" title="全部事项；完成后保留，可再次恢复">待办 <span id="countList">0</span></button>
     </nav>
 
     <main id="cards" class="cards"></main>
@@ -63,13 +63,15 @@
           <span class="stage"></span>
           <span class="round"></span>
           <span class="research"></span>
+          <span class="snoozed"></span>
         </div>
         <p class="action"></p>
         <div class="actions">
-          <button data-action="done">完成</button>
-          <button data-action="confirm">确认</button>
+          <button data-action="toggle_done">完成</button>
+          <button data-action="edit_time">补时间</button>
           <button data-action="snooze">延后</button>
-          <button data-action="source">来源</button>
+          <button data-action="source">邮件链接</button>
+          <button data-action="research" class="research-open">查看攻略</button>
           <button data-action="obsidian">Obsidian</button>
           <button data-action="edit">编辑</button>
           <button data-action="ignore" class="muted">忽略</button>
@@ -87,8 +89,10 @@
           <button type="button" id="closeDialog" class="dialog-close">×</button>
         </div>
         <input type="hidden" name="task_id">
-        <label>公司 / 事项<input name="company" required maxlength="80"></label>
-        <label>岗位<input name="role" maxlength="80"></label>
+        <div class="identity-row">
+          <label>公司 / 事项<input name="company" required maxlength="80"></label>
+          <label>岗位<input name="role" maxlength="80"></label>
+        </div>
         <div class="form-row">
           <label>阶段<input name="stage" value="自定义待办" maxlength="40"></label>
           <label>轮次<input name="round" maxlength="30"></label>
@@ -98,8 +102,8 @@
           <label>结束<input name="end_at" type="datetime-local"></label>
         </div>
         <label>硬截止<input name="deadline_at" type="datetime-local"></label>
-        <label>下一步行动<textarea name="action_summary" rows="2" required maxlength="240"></textarea></label>
-        <label>Markdown 手动补充<textarea name="manual_notes" rows="4" maxlength="2000" placeholder="准备材料、问题清单、复盘备注……"></textarea></label>
+        <label>下一步行动<textarea name="action_summary" rows="3" required maxlength="240"></textarea></label>
+        <label>Markdown 手动补充<textarea name="manual_notes" rows="6" maxlength="2000" placeholder="准备材料、问题清单、复盘备注……"></textarea></label>
         <div id="formError" class="form-error"></div>
         <div class="dialog-actions">
           <button type="button" id="cancelDialog">取消</button>
@@ -108,17 +112,59 @@
       </form>
     </dialog>
 
-    <dialog id="createDialog" class="quick-create">
-      <div class="dialog-head">
-        <div>
-          <div class="eyebrow">NEW PAPER</div>
-          <h2>新建</h2>
+    <dialog id="settingsDialog" class="settings-dialog">
+      <form id="settingsForm" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <div class="eyebrow">JOBMAILDESK CORE</div>
+            <h2 id="settingsTitle">设置</h2>
+          </div>
+          <button type="button" id="closeSettings" class="dialog-close">×</button>
         </div>
-        <button type="button" id="closeCreateDialog" class="dialog-close">×</button>
-      </div>
-      <button data-create="job">求职任务<small>进入日历与邮件工作流</small></button>
-      <button data-create="todo">待办纸<small>独立窗口，一行一个事项</small></button>
-      <button data-create="note">笔记纸<small>独立 Markdown 笔记</small></button>
+        <p id="firstRunHint" class="settings-hint hidden">首次使用请配置QQ邮箱。授权码只保存在系统安全凭据库，本程序不保存QQ密码。</p>
+
+        <section class="settings-section">
+          <h3>邮箱与扫描</h3>
+          <label>QQ邮箱<input name="email" type="email" autocomplete="username" placeholder="请输入完整QQ邮箱"></label>
+          <label>IMAP授权码<input name="authorization_code" type="password" autocomplete="new-password" placeholder="已配置时留空即可"></label>
+          <div class="form-row">
+            <label>扫描间隔（分钟）<input name="poll_minutes" type="number" min="5" max="120" value="10"></label>
+            <label>回看天数<input name="lookback_days" type="number" min="1" max="30" value="3"></label>
+          </div>
+          <button type="button" id="testMailSettings" class="secondary-wide">测试只读邮箱连接</button>
+        </section>
+
+        <section class="settings-section">
+          <label class="toggle-label"><input name="obsidian_enabled" type="checkbox">同步到Obsidian</label>
+          <p>选择一个Markdown文件作为待办总览；关闭时任务仍保存在本机。</p>
+          <div class="path-row">
+            <input name="obsidian_output" aria-label="Obsidian待办路径">
+            <button type="button" data-pick-path="obsidian_output">选择</button>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <label class="toggle-label"><input name="progress_enabled" type="checkbox">生成求职进展文档</label>
+          <p>输出文档由程序维护；台账文档由用户填写，公司进展会合并进卡片。</p>
+          <label>进展输出</label>
+          <div class="path-row">
+            <input name="progress_output" aria-label="进展输出路径">
+            <button type="button" data-pick-path="progress_output">选择</button>
+          </div>
+          <label>手动进展台账</label>
+          <div class="path-row">
+            <input name="progress_source" aria-label="手动进展台账路径">
+            <button type="button" data-pick-path="progress_source">选择</button>
+          </div>
+          <button type="button" id="createProgressTemplate" class="secondary-wide">生成规范台账模板</button>
+        </section>
+
+        <div id="settingsStatus" class="form-error"></div>
+        <div class="dialog-actions">
+          <button type="button" id="cancelSettings">取消</button>
+          <button type="submit" class="primary">保存并应用</button>
+        </div>
+      </form>
     </dialog>
 
     <script src="app.js"></script>

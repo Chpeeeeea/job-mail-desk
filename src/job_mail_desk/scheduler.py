@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -52,6 +52,8 @@ class ScheduledJobs:
 def _add_jobs(
     scheduler: BackgroundScheduler | BlockingScheduler,
     settings: Settings,
+    *,
+    initial_delay_seconds: int = 0,
 ) -> ScheduledJobs:
     jobs = ScheduledJobs(settings)
     common = {
@@ -67,7 +69,9 @@ def _add_jobs(
         ),
         id="mail-poll",
         replace_existing=True,
-        next_run_time=datetime.now().astimezone(),
+        next_run_time=(
+            datetime.now().astimezone() + timedelta(seconds=initial_delay_seconds)
+        ),
         **common,
     )
     scheduler.add_job(
@@ -100,7 +104,7 @@ def _add_jobs(
 
 def create_background_scheduler(settings: Settings) -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=settings.timezone)
-    _add_jobs(scheduler, settings)
+    _add_jobs(scheduler, settings, initial_delay_seconds=15)
     return scheduler
 
 
@@ -108,4 +112,3 @@ def run_forever(settings: Settings) -> None:
     scheduler = BlockingScheduler(timezone=settings.timezone)
     _add_jobs(scheduler, settings)
     scheduler.start()
-

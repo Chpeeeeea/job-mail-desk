@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import sys
 from dataclasses import dataclass
 
 import keyring
@@ -12,6 +13,10 @@ SERVICE = "job-mail-desk.mail"
 USERNAME = "default-imap"
 LEGACY_SERVICE = "job-mail-watch.qqmail"
 LEGACY_USERNAME = "qqmail-imap"
+
+
+def _credential_store_name() -> str:
+    return "macOS Keychain" if sys.platform == "darwin" else "Windows 凭据库"
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,15 @@ def configure_interactively() -> None:
     confirmation = _validate_code(getpass.getpass("再次输入授权码（不回显）："))
     if code != confirmation:
         raise ValueError("两次输入不一致，未保存。")
+    save_credential(email_address, code)
+    print(f"凭据已保存到{_credential_store_name()}（授权码长度：{len(code)}）。")
+
+
+def save_credential(email_address: str, authorization_code: str) -> None:
+    email_address = email_address.strip()
+    if "@" not in email_address or not email_address.isascii():
+        raise ValueError("请输入完整邮箱地址。")
+    code = _validate_code(authorization_code)
     keyring.set_password(
         SERVICE,
         USERNAME,
@@ -47,14 +61,13 @@ def configure_interactively() -> None:
             ensure_ascii=False,
         ),
     )
-    print(f"凭据已保存到 Windows 凭据库（授权码长度：{len(code)}）。")
 
 
 def _load_payload(service: str, username: str) -> str | None:
     try:
         return keyring.get_password(service, username)
     except KeyringError as exc:
-        raise RuntimeError(f"无法访问 Windows 凭据库：{exc}") from exc
+        raise RuntimeError(f"无法访问{_credential_store_name()}：{exc}") from exc
 
 
 def load_credential() -> MailCredential:
@@ -68,7 +81,7 @@ def load_credential() -> MailCredential:
         email_address = str(parsed["email"])
         code = _validate_code(str(parsed["authorization_code"]))
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Windows 凭据库中的邮箱配置无效。") from exc
+        raise RuntimeError(f"{_credential_store_name()}中的邮箱配置无效。") from exc
     return MailCredential(email=email_address, authorization_code=code)
 
 

@@ -8,7 +8,8 @@ from .credentials import load_credential
 from .exporter import export_dashboard, import_checked_states
 from .mail_reader import ImapReader
 from .markdown_store import MarkdownTaskStore
-from .parser import SHANGHAI, parse_record
+from .parser import PARSER_VERSION, SHANGHAI, parse_record
+from .progress import export_progress
 from .research import build_request, queue_request, synchronize_research_state
 from .state import StateStore
 from .task_service import message_hash, task_from_event
@@ -39,6 +40,7 @@ def scan_once(
     ensure_directories()
     store = MarkdownTaskStore(TASKS_DIR)
     state = StateStore(STATE_DB)
+    state.prepare_parser_version(PARSER_VERSION)
     run_id = state.begin_scan()
     fetched = skipped = candidates = updated = queued = urgent = exported = 0
     preview: list[dict[str, object]] = []
@@ -121,6 +123,12 @@ def scan_once(
                     tasks,
                     settings.obsidian_output,
                     settings,
+                )
+            if settings.progress_enabled:
+                export_progress(
+                    tasks,
+                    settings.progress_output,
+                    source_path=settings.progress_source,
                 )
         summary = ScanSummary(
             fetched=fetched,

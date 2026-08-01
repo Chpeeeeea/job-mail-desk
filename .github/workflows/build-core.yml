@@ -1,0 +1,72 @@
+name: Build JobMailDesk Core
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest
+      - shell: pwsh
+        run: ./scripts/secret-scan.ps1
+      - shell: pwsh
+        run: ./scripts/build.ps1 -OutputRoot "$PWD/release"
+      - shell: pwsh
+        run: ./scripts/package-core.ps1 -ExePath "$PWD/release/JobMailDesk.exe" -OutputDirectory "$PWD/release"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JobMailDesk-Core-v0.3.0-win-x64
+          path: |
+            release/JobMailDesk-Core-v0.3.0-win-x64.zip
+            release/JobMailDesk-Core-v0.3.0-win-x64.zip.sha256
+          if-no-files-found: error
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest
+      - run: uv run python setup_macos.py py2app
+      - name: Package app
+        run: |
+          built_app="$(find dist -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$built_app"
+          if [ "$built_app" != "dist/JobMailDesk.app" ]; then
+            mv "$built_app" dist/JobMailDesk.app
+          fi
+          mkdir -p release
+          ditto -c -k --sequesterRsrc --keepParent dist/JobMailDesk.app "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip"
+          shasum -a 256 "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip" > "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}
+          path: |
+            release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip
+            release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip.sha256
+          if-no-files-found: error

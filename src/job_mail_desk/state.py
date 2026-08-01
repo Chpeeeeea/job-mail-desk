@@ -62,6 +62,25 @@ class StateStore:
             )
             connection.commit()
 
+    def prepare_parser_version(self, version: str) -> bool:
+        """Replay the bounded lookback once when parsing rules change."""
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT value FROM metadata WHERE key = 'parser_version'"
+            ).fetchone()
+            if row and str(row["value"]) == version:
+                return False
+            connection.execute("DELETE FROM processed_messages")
+            connection.execute(
+                """
+                INSERT INTO metadata (key, value) VALUES ('parser_version', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (version,),
+            )
+            connection.commit()
+            return True
+
     def begin_scan(self) -> int:
         with closing(self._connect()) as connection:
             cursor = connection.execute(

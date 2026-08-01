@@ -33,3 +33,24 @@ def test_create_and_edit_manual_markdown_task(tmp_path) -> None:
     )
     assert edited.start_at == datetime(2026, 8, 6, 20, 0, tzinfo=SHANGHAI)
     assert "已更新" in edited.manual_notes
+
+
+def test_same_manual_event_updates_instead_of_creating_duplicate(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path)
+    payload = {
+        "company": "京东",
+        "role": "TET 综合方向",
+        "stage": "群面",
+        "start_at": "2026-08-06T14:00:00+08:00",
+        "end_at": "2026-08-06T17:00:00+08:00",
+        "action_summary": "参加群面",
+    }
+    first = create_manual_task(payload, store)
+    store.update_status(first.id, "done")
+    payload["action_summary"] = "参加群面并提前准备案例"
+    second = create_manual_task(payload, store)
+    assert second.id == first.id
+    assert second.status == "planned"
+    assert second.change_type == "update"
+    assert len(store.all()) == 1
+    assert "提前准备" in second.action_summary
