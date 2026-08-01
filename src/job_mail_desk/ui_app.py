@@ -35,6 +35,7 @@ from apscheduler.schedulers.base import SchedulerNotRunningError
 from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
 
+from . import __version__
 from .config import (
     CONFIG_PATH,
     DASHBOARD_FILE,
@@ -55,6 +56,7 @@ from .scanner import scan_once
 from .scheduler import create_background_scheduler
 from .state import StateStore
 from .task_service import create_manual_task
+from .updates import UpdateManager
 
 
 def _resource(name: str) -> Path:
@@ -217,6 +219,7 @@ class DesktopApi:
         self._capsule_snap_timer: threading.Timer | None = None
         self._editor_geometry: tuple[int, int, int, int] | None = None
         self._dashboard_lock = threading.Lock()
+        self._updates = UpdateManager()
 
     def get_dashboard(self) -> dict[str, object]:
         with self._dashboard_lock:
@@ -246,6 +249,9 @@ class DesktopApi:
             "progress_source": str(self._settings.progress_source or ""),
             "config_path": str(CONFIG_PATH),
             "research_enabled": self._settings.research_enabled,
+            "app_version": __version__,
+            "updates_enabled": self._settings.updates_enabled,
+            "update_channel": self._settings.update_channel,
         }
 
     def save_app_settings(self, payload: dict[str, object]) -> dict[str, object]:
@@ -280,6 +286,25 @@ class DesktopApi:
         if self._on_settings_saved:
             self._on_settings_saved(updated)
         return self.get_app_settings()
+
+    def get_update_status(self) -> dict[str, object]:
+        return self._updates.status()
+
+    def check_for_updates(self) -> dict[str, object]:
+        self._updates.start_check(self._settings.update_channel, manual=True)
+        return self._updates.status()
+
+    def maybe_check_for_updates(self) -> dict[str, object]:
+        if self._settings.updates_enabled:
+            self._updates.maybe_check(self._settings.update_channel)
+        return self._updates.status()
+
+    def open_update_release(self) -> bool:
+        url = self._updates.release_url()
+        if not url:
+            return False
+        webbrowser.open(url)
+        return True
 
     def test_mail_settings(self, payload: dict[str, object]) -> dict[str, object]:
         email = str(payload.get("email") or "").strip()
@@ -622,6 +647,14 @@ def _run_ui_primary(settings: Settings) -> None:
             "window.openSettingsDialog && window.openSettingsDialog(false))"
         )
 
+    def check_updates() -> None:
+        window.show()
+        window.evaluate_js(
+            "setCapsule(false).then(() => "
+            "window.openSettingsDialog && window.openSettingsDialog(false))"
+            ".then(() => window.checkForUpdates && window.checkForUpdates())"
+        )
+
     def quit_app(icon: Icon, _item: MenuItem | None = None) -> None:
         stop_scheduler()
         icon.stop()
@@ -643,6 +676,7 @@ def _run_ui_primary(settings: Settings) -> None:
                     checked=lambda _item: paused["value"],
                 ),
                 MenuItem("设置", lambda _icon, _item: open_settings()),
+                MenuItem("检查更新", lambda _icon, _item: check_updates()),
                 MenuItem("打开 Obsidian", lambda _icon, _item: open_obsidian()),
                 MenuItem("退出", quit_app),
             ),

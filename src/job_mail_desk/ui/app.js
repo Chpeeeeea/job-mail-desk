@@ -20,6 +20,7 @@ const taskDialog = document.querySelector("#taskDialog");
 const taskForm = document.querySelector("#taskForm");
 const settingsDialog = document.querySelector("#settingsDialog");
 const settingsForm = document.querySelector("#settingsForm");
+let updatePollTimer = null;
 
 function apiReady() {
   return window.pywebview && window.pywebview.api;
@@ -646,6 +647,10 @@ async function showSettingsDialog(firstRun = false, payload = null) {
   settingsForm.elements.progress_enabled.checked = Boolean(settings.progress_enabled);
   settingsForm.elements.progress_output.value = settings.progress_output || "";
   settingsForm.elements.progress_source.value = settings.progress_source || "";
+  settingsForm.elements.updates_enabled.checked = Boolean(settings.updates_enabled);
+  settingsForm.elements.update_channel.value = settings.update_channel || "preview";
+  document.querySelector("#currentVersion").textContent = `v${settings.app_version}`;
+  renderUpdateStatus(await window.pywebview.api.get_update_status());
   if (!settingsDialog.open) settingsDialog.showModal();
 }
 
@@ -662,8 +667,59 @@ function settingsPayload() {
     progress_enabled: settingsForm.elements.progress_enabled.checked,
     progress_output: settingsForm.elements.progress_output.value.trim(),
     progress_source: settingsForm.elements.progress_source.value.trim(),
+    updates_enabled: settingsForm.elements.updates_enabled.checked,
+    update_channel: settingsForm.elements.update_channel.value,
   };
 }
+
+function renderUpdateStatus(payload) {
+  const status = document.querySelector("#updateStatus");
+  const release = document.querySelector("#openUpdateRelease");
+  const notes = document.querySelector("#updateNotes");
+  const settingsButton = document.querySelector("#settingsButton");
+  const banner = document.querySelector("#updateBanner");
+  const current = payload.current_version ? `当前 v${payload.current_version}` : "";
+  const messages = {
+    idle: "尚未检查更新",
+    checking: "正在检查 GitHub Release…",
+    up_to_date: `${current}，已是最新版本`,
+    available: `发现 v${payload.version}，请查看公告后手动更新`,
+    error: payload.detail || "更新检查失败",
+  };
+  status.textContent = messages[payload.state] || payload.detail || "尚未检查更新";
+  status.classList.toggle("error", payload.state === "error");
+  status.classList.toggle("success", payload.state === "up_to_date");
+  release.disabled = !payload.release_url;
+  notes.classList.toggle("hidden", !payload.notes);
+  document.querySelector("#updateNotesText").textContent = payload.notes || "";
+  settingsButton.classList.toggle("update-ready", payload.state === "available");
+  banner.classList.toggle("hidden", payload.state !== "available");
+  banner.textContent = payload.state === "available"
+    ? `v${payload.version} 可用 · 查看更新公告`
+    : "";
+}
+
+async function pollUpdateStatus() {
+  if (!apiReady()) return;
+  const payload = await window.pywebview.api.get_update_status();
+  renderUpdateStatus(payload);
+  if (payload.state === "checking") {
+    if (!updatePollTimer) {
+      updatePollTimer = setInterval(pollUpdateStatus, 750);
+    }
+  } else if (updatePollTimer) {
+    clearInterval(updatePollTimer);
+    updatePollTimer = null;
+  }
+}
+
+async function checkForUpdates() {
+  if (!apiReady()) return;
+  renderUpdateStatus(await window.pywebview.api.check_for_updates());
+  await pollUpdateStatus();
+}
+
+window.checkForUpdates = checkForUpdates;
 
 async function saveAppSettings(event) {
   event.preventDefault();
@@ -746,6 +802,10 @@ async function initializeApp() {
   await refresh();
   const settings = await window.pywebview.api.get_app_settings();
   if (!settings.credential_configured) await showSettingsDialog(true, settings);
+  if (settings.updates_enabled) {
+    await window.pywebview.api.maybe_check_for_updates();
+    await pollUpdateStatus();
+  }
 }
 
 function initializeCalendarAnchor() {
@@ -773,6 +833,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
 document.querySelector("#refreshButton").addEventListener("click", refresh);
 document.querySelector("#addButton").addEventListener("click", () => showTaskDialog());
 document.querySelector("#settingsButton").addEventListener("click", () => showSettingsDialog(false));
+document.querySelector("#updateBanner").addEventListener("click", () => showSettingsDialog(false));
 document.querySelector("#capsuleButton").addEventListener("click", () => setCapsule(true));
 document.querySelector("#expandButton").addEventListener("click", () => setCapsule(false));
 document.querySelector("#closeDialog").addEventListener("click", () => taskDialog.close());
@@ -798,6 +859,10 @@ document.querySelector("#createProgressTemplate").addEventListener(
   createProgressTemplateFromSettings,
 );
 document.querySelector("#testMailSettings").addEventListener("click", testMailSettings);
+document.querySelector("#checkUpdates").addEventListener("click", checkForUpdates);
+document.querySelector("#openUpdateRelease").addEventListener("click", () => {
+  if (apiReady()) window.pywebview.api.open_update_release();
+});
 document.querySelector("#scanButton").addEventListener("click", async () => {
   const button = document.querySelector("#scanButton");
   if (!apiReady() || button.disabled) return;

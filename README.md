@@ -2,7 +2,7 @@
 
 JobMailDesk 是一个隐私优先、Markdown 原生的 Windows / macOS 求职邮件工作台。它只读扫描 IMAP 邮箱，将招聘通知整理为本地任务、周/月日历和可选的 Obsidian 待办。
 
-> 当前版本：v0.3.0 Core 预览版。公开仓库仅包含匿名源码；真实邮件、本地任务、凭据和私人链接始终留在本机。
+> 当前版本：v0.4.0 Core 预览版。公开仓库仅包含匿名源码；真实邮件、本地任务、凭据和私人链接始终留在本机。
 
 版本演进与阶段性修复见 [CHANGELOG.md](CHANGELOG.md)。项目规定每个已验收阶段都必须先更新 Changelog，再形成独立提交并推送 GitHub。
 
@@ -27,8 +27,9 @@ JobMailDesk Core 完全在本机运行，不使用大模型、不需要API Key�
 - 可选关联Obsidian待办Markdown。
 - 可选生成求职进展文档。
 - 可选创建规范的手动进展台账模板。
+- 可选每天检查一次更新，并选择预览版或稳定版通道。
 
-详细步骤见 [Core快速开始](docs/CORE_QUICKSTART.md)、[依赖说明](docs/DEPENDENCIES.md)、[发布检查清单](docs/RELEASE_CHECKLIST.md) 与 [v0.3.0验收记录](docs/ACCEPTANCE_v0.3.0.md)。
+详细步骤见 [Core快速开始](docs/CORE_QUICKSTART.md)、[版本通知与手动更新](docs/UPDATES.md)、[依赖说明](docs/DEPENDENCIES.md)、[发布检查清单](docs/RELEASE_CHECKLIST.md) 与 [v0.4.0验收记录](docs/ACCEPTANCE_v0.4.0.md)。
 
 ## 核心边界
 
@@ -54,6 +55,7 @@ JobMailDesk Core 完全在本机运行，不使用大模型、不需要API Key�
 - 手动任务按公司、岗位、阶段和日期幂等更新，重复保存不会产生第二张活动卡片。
 - 忽略状态跨扫描保留；同一邮件不会在下一次扫描时重新出现。
 - 每日 `08:00 / 13:00 / 20:00` 生成本地简报。
+- 设置页和Windows托盘可以检查GitHub Release、展示更新公告并打开对应下载页。
 - 为 `vibe-web-research` 生成零敏感字段的 JSONL 队列。
 
 ## 本地目录
@@ -66,6 +68,7 @@ JobMailDesk Core 完全在本机运行，不使用大模型、不需要API Key�
 ├── research-queue.jsonl
 ├── tasks\
 ├── digests\
+├── updates\
 └── logs\
 ```
 
@@ -140,6 +143,17 @@ JobMailDesk.exe task-update 1fb3083a5dab4e22aa3c1d6c --status planned
 
 PaperTodo 的 README 仅作为托盘和桌面收纳交互的验收参考；JobMailDesk 不再提供独立待办纸或笔记纸。旧版本产生的本地 Markdown 不会被删除，但新版本不会自动打开或继续创建它们。
 
+## 版本通知与手动更新
+
+从`v0.4.0`开始，程序可以提示有新版本，但不会自动下载、覆盖或重启：
+
+1. 打开“设置 → 软件更新”或Windows托盘“检查更新”。
+2. 选择预览版或稳定版通道。
+3. 查看更新公告并打开对应Release。
+4. 下载对应平台ZIP及`.sha256`，退出程序后手动覆盖。
+
+手动覆盖`JobMailDesk.exe`或`JobMailDesk.app`不会修改`%LOCALAPPDATA%\JobMailDesk`、macOS Application Support、系统凭据库或Obsidian。GitHub不可访问时不会影响邮件扫描和已有任务。完整说明见[版本通知与手动更新](docs/UPDATES.md)。
+
 ## 测试与构建
 
 ```powershell
@@ -152,7 +166,7 @@ uv run pytest
 Windows发布文件生成到：
 
 ```text
-release\JobMailDesk-Core-v0.3.0-win-x64.zip
+release\JobMailDesk-Core-v0.4.0-win-x64.zip
 ```
 
 PyInstaller 产物包含 Python 运行时，目标电脑无需单独安装 Python。
@@ -162,8 +176,8 @@ PyInstaller 产物包含 Python 运行时，目标电脑无需单独安装 Pytho
 GitHub Actions在真实macOS Runner上分别生成：
 
 ```text
-JobMailDesk-Core-v0.3.0-macos-arm64.zip
-JobMailDesk-Core-v0.3.0-macos-x64.zip
+JobMailDesk-Core-v0.4.0-macos-arm64.zip
+JobMailDesk-Core-v0.4.0-macos-x64.zip
 ```
 
 Apple Silicon（M1及更新）使用`arm64`，Intel Mac使用`x64`。macOS版由py2app打包，使用系统WebKit与Keychain，不需要Python。当前预览包尚未Apple签名或公证，首次打开需在“系统设置 → 隐私与安全性”中确认。macOS版通过Dock管理应用，设置入口位于纸片右上角齿轮；Windows版继续使用系统托盘。

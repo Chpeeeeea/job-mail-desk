@@ -28,7 +28,10 @@
       <div class="capsule-drag native-drag pywebview-drag-region" title="按住拖动"></div>
     </section>
 
-    <section id="urgentStrip" class="urgent-strip hidden"></section>
+    <section class="notice-stack">
+      <div id="urgentStrip" class="urgent-strip hidden"></div>
+      <button id="updateBanner" class="update-banner hidden" type="button"></button>
+    </section>
 
     <nav class="tabs" aria-label="任务视图">
       <button class="tab active" data-view="today">今天 <span id="countToday">0</span></button>
@@ -157,6 +160,30 @@
             <button type="button" data-pick-path="progress_source">选择</button>
           </div>
           <button type="button" id="createProgressTemplate" class="secondary-wide">生成规范台账模板</button>
+        </section>
+
+        <section class="settings-section update-section">
+          <div class="settings-section-head">
+            <h3>版本通知</h3>
+            <span id="currentVersion" class="version-chip">v0.4.0</span>
+          </div>
+          <label class="toggle-label"><input name="updates_enabled" type="checkbox">每天自动检查一次</label>
+          <p>只读取公开 GitHub Release并显示更新公告；下载和覆盖仍由用户手动完成。</p>
+          <label>更新通道
+            <select name="update_channel">
+              <option value="preview">预览版（包含 prerelease）</option>
+              <option value="stable">稳定版</option>
+            </select>
+          </label>
+          <div class="update-actions">
+            <button type="button" id="checkUpdates" class="secondary-wide">检查更新</button>
+            <button type="button" id="openUpdateRelease">打开 Release 下载</button>
+          </div>
+          <div id="updateStatus" class="update-status">尚未检查更新</div>
+          <details id="updateNotes" class="update-notes hidden">
+            <summary>查看更新说明</summary>
+            <pre id="updateNotesText"></pre>
+          </details>
         </section>
 
         <div id="settingsStatus" class="form-error"></div>

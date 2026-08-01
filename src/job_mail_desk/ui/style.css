@@ -746,6 +746,120 @@ dialog::backdrop {
   font-size: 12px;
 }
 
+.notice-stack:has(> .hidden:first-child):has(> .hidden:last-child) {
+  display: none;
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-section-head h3 {
+  margin: 0;
+}
+
+.version-chip {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+#settingsForm select {
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.update-actions button {
+  flex: 1 1 120px;
+}
+
+.update-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.update-status.success {
+  color: var(--safe);
+}
+
+.update-status.error {
+  color: var(--accent);
+}
+
+.update-notes summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.update-notes pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink);
+  font: 12px/1.55 "Microsoft YaHei", sans-serif;
+  white-space: pre-wrap;
+}
+
+#settingsButton.update-ready {
+  position: relative;
+}
+
+#settingsButton.update-ready::after {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+.update-banner {
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-soft) 58%, var(--paper-raised));
+  color: var(--accent);
+  font: 800 11px/1.3 "Microsoft YaHei UI", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.update-banner:hover {
+  border-color: var(--accent);
+}
+
+body.capsule .update-banner {
+  display: none;
+}
+
 .settings-section p {
   margin: 2px 0 8px;
   color: var(--muted);

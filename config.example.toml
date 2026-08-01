@@ -30,3 +30,7 @@ width = 480
 height = 740
 always_on_top = true
 start_hidden = false
+
+[updates]
+enabled = true
+channel = "preview"

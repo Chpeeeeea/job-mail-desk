@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 from setuptools import find_packages, setup
 
@@ -8,6 +9,8 @@ from setuptools import find_packages, setup
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = PROJECT_ROOT / "src"
 APP = [str(PROJECT_ROOT / "launcher.py")]
+with (PROJECT_ROOT / "pyproject.toml").open("rb") as stream:
+    VERSION = str(tomllib.load(stream)["project"]["version"])
 OPTIONS = {
     "argv_emulation": False,
     "packages": ["job_mail_desk", "keyring.backends.macOS", "webview"],
@@ -16,8 +19,8 @@ OPTIONS = {
         "CFBundleName": "JobMailDesk Core",
         "CFBundleDisplayName": "JobMailDesk Core",
         "CFBundleIdentifier": "io.github.chpeeeeea.jobmaildesk",
-        "CFBundleShortVersionString": "0.3.0",
-        "CFBundleVersion": "0.3.0",
+        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": VERSION,
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
     },
@@ -26,7 +29,7 @@ OPTIONS = {
 
 setup(
     name="JobMailDesk",
-    version="0.3.0",
+    version=VERSION,
     description="Privacy-first, Markdown-native job email desk.",
     app=APP,
     package_dir={"": str(SOURCE_ROOT)},

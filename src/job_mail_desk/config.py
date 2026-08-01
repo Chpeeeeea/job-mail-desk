@@ -55,6 +55,8 @@ class Settings:
     ui_height: int = 740
     always_on_top: bool = True
     start_hidden: bool = False
+    updates_enabled: bool = True
+    update_channel: str = "preview"
 
 
 def ensure_directories() -> None:
@@ -102,6 +104,10 @@ width = 480
 height = 740
 always_on_top = true
 start_hidden = false
+
+[updates]
+enabled = true
+channel = "preview"
 """
 
 
@@ -124,6 +130,10 @@ def load_settings(path: Path | None = None) -> Settings:
     research = payload.get("research", {})
     progress = payload.get("progress", {})
     ui = payload.get("ui", {})
+    updates = payload.get("updates", {})
+    update_channel = str(updates.get("channel", "preview"))
+    if update_channel not in {"stable", "preview"}:
+        update_channel = "preview"
     return Settings(
         mail_host=str(mail.get("host", "imap.qq.com")),
         mail_port=int(mail.get("port", 993)),
@@ -154,6 +164,8 @@ def load_settings(path: Path | None = None) -> Settings:
         ui_height=int(ui.get("height", 740)),
         always_on_top=bool(ui.get("always_on_top", True)),
         start_hidden=bool(ui.get("start_hidden", False)),
+        updates_enabled=bool(updates.get("enabled", True)),
+        update_channel=update_channel,
     )
 
 
@@ -197,6 +209,10 @@ width = {settings.ui_width}
 height = {settings.ui_height}
 always_on_top = {str(settings.always_on_top).lower()}
 start_hidden = {str(settings.start_hidden).lower()}
+
+[updates]
+enabled = {str(settings.updates_enabled).lower()}
+channel = "{_toml_string(settings.update_channel)}"
 '''
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(text, encoding="utf-8")
@@ -217,6 +233,11 @@ def settings_from_payload(
         str(payload.get("progress_output") or current.progress_output)
     )
     progress_source_value = str(payload.get("progress_source") or "").strip()
+    update_channel = str(
+        payload.get("update_channel") or current.update_channel
+    ).strip()
+    if update_channel not in {"stable", "preview"}:
+        raise ValueError("更新通道必须是 stable 或 preview。")
     return replace(
         current,
         poll_minutes=poll_minutes,
@@ -226,4 +247,6 @@ def settings_from_payload(
         progress_enabled=bool(payload.get("progress_enabled", False)),
         progress_output=progress_output,
         progress_source=(Path(progress_source_value) if progress_source_value else None),
+        updates_enabled=bool(payload.get("updates_enabled", current.updates_enabled)),
+        update_channel=update_channel,
     )
