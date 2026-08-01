@@ -296,7 +296,8 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | [安全说明](SECURITY.md) | 漏洞报告与秘密处理规则 |
 | [贡献指南](CONTRIBUTING.md) | 本地开发、测试和提交规范 |
 | [第三方声明](THIRD_PARTY_NOTICES.md) | 依赖许可与设计参考边界 |
-| [完整许可证](LICENSE.md) | MIT 授权摘要与完整条款 |
+| [完整许可证](LICENSE.md) | 可机器识别的标准 MIT 条款 |
+| [许可说明](docs/LICENSING.md) | 中英文授权摘要、再分发清单与第三方边界 |
 | [Changelog](CHANGELOG.md) | 每个已验收阶段的功能与修复 |
 | [v0.4.1 验收记录](docs/ACCEPTANCE_v0.4.1.md) | 当前版本自动化与发布验证 |
 
@@ -370,6 +371,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-core.ps1 `
 
 ## 许可证与设计参考
 
-JobMailDesk 使用 [MIT License](LICENSE.md)，版权声明为 `Copyright (c) 2026 JY`。你可以使用、修改、分发和商业化，但必须保留原版权声明与 MIT 授权文本。
+JobMailDesk 使用 [MIT License](LICENSE.md)，版权声明为 `Copyright (c) 2026 JY`。你可以使用、修改、分发和商业化，但必须保留原版权声明与 MIT 授权文本。常见场景和再分发清单见[许可说明](docs/LICENSING.md)。
 
 [PaperTodo](https://github.com/snownico0722/PaperTodo) 仅作为纸片式桌面交互和 README 信息架构的设计研究对象。JobMailDesk 没有复制 PaperTodo 的代码、文案、截图、图标、动画或其他素材；详细边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

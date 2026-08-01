@@ -44,6 +44,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot "CHANGELOG.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $projectRoot "PRIVACY.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $projectRoot "LICENSE.md") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $projectRoot "docs\LICENSING.md") -Destination (Join-Path $packageRoot "LICENSING.zh-CN.md")
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "install-shortcuts.ps1") -Destination (Join-Path $packageRoot "install-shortcuts.ps1")
     Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -Force
     $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
