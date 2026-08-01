@@ -5,6 +5,7 @@ JobMailDesk 使用语义化版本号。每个可验证阶段必须先更新本�
 ## [Unreleased]
 
 - GitHub Actions在指向`main`的Pull Request中自动运行Windows与macOS双架构构建，确保首次引入工作流时也能完成远端验收。
+- 将py2app配置隔离到`packaging/macos/`，避免根目录PEP 621依赖被映射为py2app已禁止的`install_requires`。
 
 ## [0.3.0] - 2026-08-01
 

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from setuptools import find_packages, setup
 
 
-APP = ["launcher.py"]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SOURCE_ROOT = PROJECT_ROOT / "src"
+APP = [str(PROJECT_ROOT / "launcher.py")]
 OPTIONS = {
     "argv_emulation": False,
     "packages": ["job_mail_desk", "keyring.backends.macOS", "webview"],
@@ -24,9 +28,8 @@ setup(
     version="0.3.0",
     description="Privacy-first, Markdown-native job email desk.",
     app=APP,
-    package_dir={"": "src"},
-    packages=find_packages("src"),
+    package_dir={"": str(SOURCE_ROOT)},
+    packages=find_packages(str(SOURCE_ROOT)),
     package_data={"job_mail_desk": ["ui/*.html", "ui/*.css", "ui/*.js"]},
     options={"py2app": OPTIONS},
-    setup_requires=["py2app"],
 )

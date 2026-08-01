@@ -55,16 +55,18 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --group dev
       - run: uv run pytest
-      - run: uv run python setup_macos.py py2app
+      - name: Build macOS app
+        working-directory: packaging/macos
+        run: uv run --project ../.. python setup.py py2app
       - name: Package app
         run: |
-          built_app="$(find dist -maxdepth 1 -name '*.app' -print -quit)"
+          built_app="$(find packaging/macos/dist -maxdepth 1 -name '*.app' -print -quit)"
           test -n "$built_app"
-          if [ "$built_app" != "dist/JobMailDesk.app" ]; then
-            mv "$built_app" dist/JobMailDesk.app
+          if [ "$built_app" != "packaging/macos/dist/JobMailDesk.app" ]; then
+            mv "$built_app" packaging/macos/dist/JobMailDesk.app
           fi
           mkdir -p release
-          ditto -c -k --sequesterRsrc --keepParent dist/JobMailDesk.app "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent packaging/macos/dist/JobMailDesk.app "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip"
           shasum -a 256 "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip" > "release/JobMailDesk-Core-v0.3.0-macos-${{ matrix.arch }}.zip.sha256"
       - uses: actions/upload-artifact@v4
         with:
