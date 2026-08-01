@@ -4,7 +4,7 @@ JobMailDesk 使用语义化版本号。每个可验证阶段必须先更新本�
 
 ## [Unreleased]
 
-- 后续阶段性改动记录在这里；发布时移动到对应版本标题下。
+- GitHub Actions在指向`main`的Pull Request中自动运行Windows与macOS双架构构建，确保首次引入工作流时也能完成远端验收。
 
 ## [0.3.0] - 2026-08-01
 
