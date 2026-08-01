@@ -336,6 +336,7 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | --- | --- |
 | [Core 快速开始](docs/CORE_QUICKSTART.md) | 首次安装、邮箱和进展台账配置 |
 | [版本通知与更新](docs/UPDATES.md) | 更新通道、手动覆盖与失败边界 |
+| [维护、更新与发布规则](docs/MAINTENANCE.md) | 分支、版本号、PR、Release、回滚与完成标准 |
 | [依赖说明](docs/DEPENDENCIES.md) | 终端用户与开发环境依赖 |
 | [架构说明](docs/ARCHITECTURE.md) | 模块、数据流和本地存储 |
 | [隐私说明](PRIVACY.md) | 邮件、凭据与公开研究边界 |
