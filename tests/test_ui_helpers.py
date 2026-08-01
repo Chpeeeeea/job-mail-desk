@@ -128,6 +128,10 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert 'id="createProgressTemplate"' in html
     assert 'id="checkUpdates"' in html
     assert 'id="openUpdateRelease"' in html
+    assert 'id="openUpdateRelease" class="secondary-wide"' in html
+    assert '>打开下载页</button>' in html
+    assert ".update-actions button" in stylesheet
+    assert "font-size: 10px" in stylesheet
     assert 'id="updateBanner"' in html
     assert 'window.openSettingsDialog = showSettingsDialog' in javascript
     assert 'window.checkForUpdates = checkForUpdates' in javascript
