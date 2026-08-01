@@ -50,6 +50,9 @@ jobmaildesk task-update <稳定任务ID> [字段参数]
 
 ## 发布
 
+- 完整维护流程以`docs/MAINTENANCE.md`为准；本节是不可跳过的发布闸门。
+- `main`是唯一正式主线，不直接在`main`开发；所有阶段修改必须通过短期分支和Pull Request进入主线。
+- 必须区分“推送分支”“合并主线”和“发布安装包”：阶段提交需要推送，验收完成需要合并，只有可交付的程序变化才创建新Release。
 - Windows包使用PyInstaller，启用Per-Monitor DPI v2。
 - macOS包使用py2app，在真实macOS Runner分别生成arm64与Intel产物。
 - 只有 Pull Request 的 Windows x64、macOS Apple Silicon、macOS Intel 检查全部通过后才能合并并创建版本标签；标签必须对应 `docs/RELEASE_NOTES_vX.Y.Z.md`。
@@ -58,3 +61,5 @@ jobmaildesk task-update <稳定任务ID> [字段参数]
 - 每个可验证的阶段性进展都必须更新`CHANGELOG.md`；禁止只有代码提交而没有面向用户的变更记录。
 - 阶段验收通过后应形成独立、可回滚的Git提交并推送到GitHub，不把多个完成阶段长期积压在本地工作树。
 - 推送前再次执行`pytest`、秘密扫描和`git diff --check`；远端推送成功后核对提交SHA与GitHub Actions状态。
+- 已发布标签和资产不得覆盖、删除或重新指向；发现问题时发布更高PATCH版本。
+- 合并或发布后必须验证README入口、更新公告和下载链接，确保用户知道如何使用与升级。
