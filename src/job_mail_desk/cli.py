@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 
+from .agent_bridge import apply_task_update, list_tasks
 from .config import (
     DASHBOARD_FILE,
     DIGESTS_DIR,
@@ -18,9 +19,10 @@ from .exporter import export_dashboard, import_checked_states
 from .logging_setup import configure_logging
 from .markdown_store import MarkdownTaskStore
 from .research import pending_requests
+from .progress import export_progress
 from .scanner import scan_once
 from .scheduler import run_forever
-from .ui_app import run_paper_ui, run_ui
+from .ui_app import run_ui, show_existing_window
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -39,14 +41,41 @@ def _parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export", help="导出 Markdown 总览")
     export.add_argument("--obsidian", action="store_true")
     subparsers.add_parser("research-queue", help="查看待处理研究请求")
-    ui = subparsers.add_parser("ui", help="启动桌面组件")
-    ui.add_argument(
-        "--new",
-        choices=("todo", "note"),
-        help="启动时新建一张待办纸或笔记纸",
+    task_list = subparsers.add_parser(
+        "task-list",
+        help="为本地 Agent 列出可更新任务及稳定 ID",
     )
-    paper = subparsers.add_parser("paper", help=argparse.SUPPRESS)
-    paper.add_argument("paper_id")
+    task_list.add_argument("--company", default="")
+    task_list.add_argument("--role", default="")
+    task_list.add_argument("--stage", default="")
+    task_list.add_argument("--include-irrelevant", action="store_true")
+    task_update = subparsers.add_parser(
+        "task-update",
+        help="按稳定 ID 更新任务并同步 Markdown、进展和 Obsidian",
+    )
+    task_update.add_argument("task_id")
+    task_update.add_argument(
+        "--status",
+        choices=(
+            "needs_review",
+            "confirmed",
+            "planned",
+            "done",
+            "cancelled",
+            "irrelevant",
+        ),
+    )
+    task_update.add_argument("--start-at")
+    task_update.add_argument("--end-at")
+    task_update.add_argument("--deadline-at")
+    task_update.add_argument("--company")
+    task_update.add_argument("--role")
+    task_update.add_argument("--stage")
+    task_update.add_argument("--round")
+    task_update.add_argument("--action-summary")
+    task_update.add_argument("--manual-notes")
+    subparsers.add_parser("ui", help="启动桌面组件")
+    subparsers.add_parser("show", help="显示现有桌面组件；未运行时启动")
     return parser
 
 
@@ -87,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.obsidian:
             import_checked_states(target, store)
         export_dashboard(store.all(), target, settings)
+        if settings.progress_enabled:
+            export_progress(
+                store.all(),
+                settings.progress_output,
+                source_path=settings.progress_source,
+            )
         print(target)
         return 0
     if args.command == "research-queue":
@@ -98,11 +133,53 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
-    if args.command == "ui":
-        run_ui(settings, initial_paper=args.new)
+    if args.command == "task-list":
+        print(
+            json.dumps(
+                list_tasks(
+                    company=args.company,
+                    role=args.role,
+                    stage=args.stage,
+                    include_irrelevant=args.include_irrelevant,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
-    if args.command == "paper":
-        run_paper_ui(settings, args.paper_id)
+    if args.command == "task-update":
+        changes = {
+            key: value
+            for key, value in {
+                "status": args.status,
+                "start_at": args.start_at,
+                "end_at": args.end_at,
+                "deadline_at": args.deadline_at,
+                "company": args.company,
+                "role": args.role,
+                "stage": args.stage,
+                "round": args.round,
+                "action_summary": args.action_summary,
+                "manual_notes": args.manual_notes,
+            }.items()
+            if value is not None
+        }
+        if not changes:
+            raise ValueError("至少提供一个更新字段。")
+        print(
+            json.dumps(
+                apply_task_update(settings, args.task_id, changes),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.command == "ui":
+        run_ui(settings)
+        return 0
+    if args.command == "show":
+        if not show_existing_window():
+            run_ui(settings)
         return 0
     return 2
 

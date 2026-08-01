@@ -10,6 +10,7 @@ from .privacy import redact_text
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+PARSER_VERSION = "2026.08.01.5"
 URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 RECRUITING_KEYWORDS = (
     "笔试",
@@ -29,8 +30,11 @@ RECRUITING_KEYWORDS = (
     "录用",
     "未通过",
     "感谢投递",
+    "感谢您投递",
+    "完善简历",
 )
 STAGES = (
+    ("简历完善", ("完善简历信息", "完善简历", "更新简历信息")),
     ("Offer", ("offer", "录用通知", "录用意向")),
     ("未通过", ("未通过", "遗憾通知", "不匹配")),
     ("在线笔试", ("在线笔试", "笔试")),
@@ -39,25 +43,31 @@ STAGES = (
     ("HR 面试", ("HR面", "HR 面", "人力面试")),
     ("面试", ("面试邀请", "面试安排", "业务面", "面试")),
     ("材料截止", ("材料提交", "材料补充", "提交材料")),
-    ("网申", ("网申", "申请成功", "感谢投递")),
+    ("网申", ("网申", "申请成功", "感谢投递", "感谢您投递")),
 )
 FULL_RANGE = re.compile(
     r"(?P<sy>20\d{2})[年./-](?P<sm>\d{1,2})[月./-](?P<sd>\d{1,2})[日号]?"
-    r"[^\d]{0,12}(?P<sh>[01]?\d|2[0-3])[:：](?P<smin>[0-5]\d)(?::[0-5]\d)?"
+    r"[^\d]{0,12}(?P<sh>[01]?\d|2[0-3]|24)[:：](?P<smin>[0-5]\d)(?::[0-5]\d)?"
     r"\s*(?:至|到|—|–|-|~|～)\s*"
     r"(?P<ey>20\d{2})[年./-](?P<em>\d{1,2})[月./-](?P<ed>\d{1,2})[日号]?"
-    r"[^\d]{0,12}(?P<eh>[01]?\d|2[0-3])[:：](?P<emin>[0-5]\d)(?::[0-5]\d)?"
+    r"[^\d]{0,12}(?P<eh>[01]?\d|2[0-3]|24)[:：](?P<emin>[0-5]\d)(?::[0-5]\d)?"
 )
 SAME_DAY_RANGE = re.compile(
     r"(?:(?P<y>20\d{2})[年./-])?(?P<m>\d{1,2})[月./-](?P<d>\d{1,2})[日号]?"
-    r"[^\d]{0,12}(?P<sh>[01]?\d|2[0-3])[:：](?P<smin>[0-5]\d)"
-    r"\s*(?:至|到|—|–|-|~|～)\s*(?P<eh>[01]?\d|2[0-3])[:：](?P<emin>[0-5]\d)"
+    r"[^\d]{0,12}(?P<sh>[01]?\d|2[0-3]|24)[:：](?P<smin>[0-5]\d)"
+    r"\s*(?:至|到|—|–|-|~|～)\s*(?P<eh>[01]?\d|2[0-3]|24)[:：](?P<emin>[0-5]\d)"
 )
 DATETIME = re.compile(
     r"(?:(?P<y>20\d{2})[年./-])?(?P<m>\d{1,2})[月./-](?P<d>\d{1,2})[日号]?"
-    r"[^\d]{0,12}(?P<h>[01]?\d|2[0-3])[:：](?P<min>[0-5]\d)"
+    r"[^\d]{0,12}(?P<h>[01]?\d|2[0-3]|24)[:：](?P<min>[0-5]\d)"
+)
+CN_DATETIME = re.compile(
+    r"(?:(?P<y>20\d{2})[年./-])?(?P<m>\d{1,2})[月./-](?P<d>\d{1,2})[日号]?"
+    r"[^\d]{0,12}(?P<h>[01]?\d|2[0-3]|24)\s*点(?:\s*(?P<min>[0-5]?\d)\s*分)?"
 )
 ROLE_PATTERNS = (
+    re.compile(r"(?:邀请您参加|邀请你参加)\s*([^，。\n]{2,60}?)\s*岗位"),
+    re.compile(r"感谢您投递[^\n，。]{2,120}[）)]([^，。]{2,40})，现邀请"),
     re.compile(r"(?:面试职位|应聘职位|职位名称|应聘岗位|岗位名称)\s*[:：]\s*([^\n。；]{2,60})"),
     re.compile(r"(?:岗位|职位)\s*[:：]\s*([^\n。；]{2,60})"),
 )
@@ -82,14 +92,16 @@ def _dt(
     minute: str,
     received: datetime,
 ) -> datetime:
-    return datetime(
+    parsed_hour = int(hour)
+    value = datetime(
         _year(year, int(month), int(day), received),
         int(month),
         int(day),
-        int(hour),
+        0 if parsed_hour == 24 else parsed_hour,
         int(minute),
         tzinfo=SHANGHAI,
     )
+    return value + timedelta(days=1) if parsed_hour == 24 else value
 
 
 def _times(
@@ -106,25 +118,52 @@ def _times(
     elif same:
         g = same.groupdict()
         start = _dt(g["y"], g["m"], g["d"], g["sh"], g["smin"], received)
-        end = start.replace(hour=int(g["eh"]), minute=int(g["emin"]))
+        end_hour = int(g["eh"])
+        end = start.replace(
+            hour=0 if end_hour == 24 else end_hour,
+            minute=int(g["emin"]),
+        )
+        if end_hour == 24:
+            end += timedelta(days=1)
         if end <= start:
             end += timedelta(days=1)
-    for match in DATETIME.finditer(text):
+    datetime_matches = [*DATETIME.finditer(text), *CN_DATETIME.finditer(text)]
+    datetime_matches.sort(key=lambda item: item.start())
+    for match in datetime_matches:
         g = match.groupdict()
-        candidate = _dt(g["y"], g["m"], g["d"], g["h"], g["min"], received)
-        context = text[max(0, match.start() - 30) : match.end() + 20]
-        if re.search(r"截止|之前|前完成|有效期至|最晚", context):
+        candidate = _dt(
+            g["y"],
+            g["m"],
+            g["d"],
+            g["h"],
+            g.get("min") or "00",
+            received,
+        )
+        before = text[max(0, match.start() - 36) : match.start()]
+        after = text[match.end() : match.end() + 20]
+        deadline_before = re.search(
+            r"(?:截止(?:时间)?|有效期至|最晚|请在|须在|务必在)[^。；;]{0,30}$",
+            before,
+        )
+        deadline_after = re.search(
+            r"^\s*(?:之前|前(?:\s|完成|[，,。；;])|失效|到期|过期)",
+            after,
+        )
+        if deadline_before or deadline_after:
             deadline = candidate
-        elif start is None:
+        elif re.search(r"^\s*生效", after) or start is None:
             start = candidate
+    if start and deadline and re.search(r"生效", text) and re.search(r"失效", text):
+        end, deadline = deadline, None
     return start, end, deadline
 
 
-def _stage(text: str) -> str:
-    lowered = text.lower()
-    for stage, keywords in STAGES:
-        if any(keyword.lower() in lowered for keyword in keywords):
-            return stage
+def _stage(subject: str, body: str) -> str:
+    for text in (subject, body):
+        lowered = text.lower()
+        for stage, keywords in STAGES:
+            if any(keyword.lower() in lowered for keyword in keywords):
+                return stage
     return "招聘通知"
 
 
@@ -138,6 +177,7 @@ def _event_type(stage: str) -> str:
         "HR 面试": "interview",
         "面试": "interview",
         "材料截止": "deadline",
+        "简历完善": "deadline",
         "网申": "application",
     }.get(stage, "notice")
 
@@ -159,10 +199,17 @@ def _change(subject: str, body: str) -> str:
 def _company(subject: str, sender: str) -> str | None:
     bracket = re.search(r"【([^】]{2,30})】", subject)
     if bracket:
-        return normalize(bracket.group(1))
+        company = normalize(bracket.group(1))
+        return {"讯飞招聘": "科大讯飞"}.get(company, company)
     source = re.match(r"来自([^的]{2,30})的", subject)
     if source:
         return normalize(source.group(1))
+    acknowledgement = re.search(
+        r"感谢(?:您|你)投递([^，。]{2,50}?)(?:校园招聘|校招|招聘|职位|岗位)",
+        subject,
+    )
+    if acknowledgement:
+        return normalize(acknowledgement.group(1))
     prefix = re.search(
         r"([\u4e00-\u9fffA-Za-z·.]{2,30}?)(?:20\d{2})?"
         r"(?:校园招聘|校招|招聘|邀请|笔试|测评|面试)",
@@ -211,7 +258,21 @@ def _evidence(text: str) -> tuple[str, ...]:
     for sentence in sentences:
         if any(
             keyword in sentence
-            for keyword in ("请于", "时间", "截止", "准备", "携带", "完成", "链接", "面试", "笔试")
+            for keyword in (
+                "请于",
+                "请在",
+                "时间",
+                "截止",
+                "失效",
+                "准备",
+                "携带",
+                "完成",
+                "链接",
+                "面试",
+                "笔试",
+                "测评",
+                "简历",
+            )
         ):
             cleaned = redact_text(sentence)
             cleaned = re.sub(r"https?://\S+", "[本地链接]", cleaned)
@@ -229,7 +290,7 @@ def parse_record(record: MailRecord) -> ParsedEvent | None:
     matches = tuple(keyword for keyword in RECRUITING_KEYWORDS if keyword.lower() in combined.lower())
     if not matches:
         return None
-    stage = _stage(combined)
+    stage = _stage(subject, body)
     start, end, deadline = _times(combined, record.received_at.astimezone(SHANGHAI))
     company = _company(subject, record.sender)
     role = _role(record.body)

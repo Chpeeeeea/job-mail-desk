@@ -1,50 +1,65 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import ctypes
 import sys
 import threading
+import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
+
+def _enable_high_dpi_rendering() -> None:
+    """Prevent Windows from bitmap-scaling the whole WebView on HiDPI screens."""
+    if sys.platform != "win32":
+        return
+    try:
+        set_context = ctypes.windll.user32.SetProcessDpiAwarenessContext
+        set_context.argtypes = [ctypes.c_void_p]
+        set_context.restype = ctypes.c_bool
+        set_context(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except (AttributeError, OSError):
+            pass
+
+
+_enable_high_dpi_rendering()
+
 import webview
+from apscheduler.schedulers.base import SchedulerNotRunningError
 from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
 
 from .config import (
+    CONFIG_PATH,
     DASHBOARD_FILE,
-    NOTE_ASSETS_DIR,
-    PAPER_BACKUPS_DIR,
-    PAPERS_DIR,
-    PREFERENCES_FILE,
     STATE_DB,
     TASKS_DIR,
-    TRASH_DIR,
     Settings,
+    settings_from_payload,
+    write_settings,
 )
-from .dashboard import dashboard_payload
-from .exporter import export_dashboard
+from .agent_bridge import apply_task_update, sync_outputs
+from .credentials import MailCredential, load_credential, save_credential
+from .mail_reader import ImapReader
+from .dashboard import cached_dashboard_payload
 from .markdown_store import MarkdownTaskStore
-from .image_store import NoteImageStore
-from .paper_store import PaperStore
-from .preferences import load_preferences, update_preferences
-from .research import close_requests_for_task
+from .research import request_states
+from .progress import create_progress_template
 from .scanner import scan_once
 from .scheduler import create_background_scheduler
 from .state import StateStore
-from .task_service import create_manual_task, edit_task_fields
+from .task_service import create_manual_task
 
 
 def _resource(name: str) -> Path:
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
     return root / "job_mail_desk" / "ui" / name if hasattr(sys, "_MEIPASS") else Path(__file__).parent / "ui" / name
-
-
-def _paper_url(paper_id: str) -> str:
-    return f"{_resource('paper.html').as_uri()}#paper={paper_id}"
 
 
 def _open_path(path: Path) -> None:
@@ -60,56 +75,265 @@ def _open_obsidian_uri(path: Path) -> None:
     )
 
 
-def _spawn_paper_process(paper_id: str) -> subprocess.Popen[bytes]:
-    if getattr(sys, "frozen", False):
-        command = [sys.executable, "paper", paper_id]
-    else:
-        command = [sys.executable, "-m", "job_mail_desk", "paper", paper_id]
-    creationflags = (
-        subprocess.CREATE_NO_WINDOW
-        if sys.platform == "win32"
-        else 0
+CAPSULE_WIDTH = 36
+CAPSULE_HEIGHT = 88
+CAPSULE_VISIBLE_EDGE = 32
+EDITOR_WIDTH = 680
+EDITOR_HEIGHT = 820
+INSTANCE_MUTEX_NAME = r"Local\JobMailDesk.Desktop.Singleton.v1"
+ERROR_ALREADY_EXISTS = 183
+
+
+def _window_handle(window: Any) -> int:
+    handle = window.native.Handle
+    return int(handle.ToInt64()) if hasattr(handle, "ToInt64") else int(handle)
+
+
+def _hide_from_task_switcher(window: Any) -> None:
+    """Keep the tray-managed widget out of the taskbar and Alt+Tab."""
+    if sys.platform != "win32" or os.environ.get("JOBMAILDESK_UI_QA") == "1":
+        return
+    hwnd = _window_handle(window)
+    user32 = ctypes.windll.user32
+    get_style = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+    set_style = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+    extended_style = get_style(hwnd, -20)
+    extended_style = (extended_style | 0x00000080) & ~0x00040000
+    set_style(hwnd, -20, extended_style)
+    user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0037)
+
+
+def show_existing_window(
+    title: str = "JobMailDesk",
+    *,
+    wait_seconds: float = 0,
+) -> bool:
+    """Reveal the existing tray-managed window without launching a duplicate."""
+    if sys.platform != "win32":
+        return False
+    user32 = ctypes.windll.user32
+    deadline = time.monotonic() + max(0, wait_seconds)
+    while True:
+        hwnd = user32.FindWindowW(None, title)
+        if hwnd:
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW
+            user32.SetForegroundWindow(hwnd)
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+
+
+def _claim_single_instance(
+    name: str = INSTANCE_MUTEX_NAME,
+) -> tuple[Any | None, bool]:
+    """Atomically claim the desktop instance before any window is created."""
+    if sys.platform == "darwin":
+        import fcntl
+
+        lock_path = CONFIG_PATH.parent / "instance.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a+b")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.close()
+            return None, False
+        return handle, True
+    if sys.platform != "win32":
+        return None, True
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_mutex = kernel32.CreateMutexW
+    create_mutex.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    create_mutex.restype = ctypes.c_void_p
+    ctypes.set_last_error(0)
+    handle = create_mutex(None, False, name)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    already_exists = ctypes.get_last_error() == ERROR_ALREADY_EXISTS
+    if already_exists:
+        kernel32.CloseHandle(handle)
+        return None, False
+    return int(handle), True
+
+
+def _close_instance_handle(handle: Any | None) -> None:
+    if sys.platform == "win32" and handle:
+        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(handle))
+    elif sys.platform == "darwin" and handle:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _capsule_anchor(
+    x: int,
+    y: int,
+    width: int = CAPSULE_WIDTH,
+    height: int = CAPSULE_HEIGHT,
+) -> tuple[int, int, int]:
+    """Calculate a movable, multi-monitor edge anchor for a capsule."""
+    screens = list(webview.screens)
+    if not screens:
+        return x, x, y
+    center_x = x + width // 2
+    center_y = y + height // 2
+
+    def distance(screen: Any) -> int:
+        nearest_x = min(max(center_x, screen.x), screen.x + screen.width)
+        nearest_y = min(max(center_y, screen.y), screen.y + screen.height)
+        return (center_x - nearest_x) ** 2 + (center_y - nearest_y) ** 2
+
+    screen = min(screens, key=distance)
+    left_distance = abs(x - screen.x)
+    right_distance = abs(screen.x + screen.width - (x + width))
+    on_left = left_distance <= right_distance
+    shown_x = screen.x + 2 if on_left else screen.x + screen.width - width - 2
+    hidden_x = (
+        screen.x - width + CAPSULE_VISIBLE_EDGE
+        if on_left
+        else screen.x + screen.width - CAPSULE_VISIBLE_EDGE
     )
-    return subprocess.Popen(command, creationflags=creationflags)
+    target_y = max(
+        screen.y + 28,
+        min(y, screen.y + screen.height - height - 40),
+    )
+    return hidden_x, shown_x, target_y
 
 
 class DesktopApi:
     def __init__(
         self,
         settings: Settings,
-        paper_manager: "PaperWindowManager | None" = None,
+        on_settings_saved: Callable[[Settings], None] | None = None,
     ) -> None:
-        self.settings = settings
-        self.paper_manager = paper_manager
-        self.window: Any = None
+        self._settings = settings
+        self._on_settings_saved = on_settings_saved
+        self._window: Any = None
         self._scan_lock = threading.Lock()
         self._expanded_geometry: tuple[int, int, int, int] | None = None
         self._capsule_positions: tuple[int, int, int] | None = None
+        self._capsule_snap_timer: threading.Timer | None = None
+        self._editor_geometry: tuple[int, int, int, int] | None = None
+        self._dashboard_lock = threading.Lock()
 
     def get_dashboard(self) -> dict[str, object]:
-        return dashboard_payload()
+        with self._dashboard_lock:
+            return cached_dashboard_payload(
+                self._settings.research_queue,
+                self._settings.progress_source,
+            )
+
+    def get_app_settings(self) -> dict[str, object]:
+        try:
+            credential = load_credential()
+            credential_configured = True
+            email = credential.email
+        except RuntimeError:
+            credential_configured = False
+            email = ""
+        return {
+            "credential_configured": credential_configured,
+            "email": email,
+            "mail_host": self._settings.mail_host,
+            "poll_minutes": self._settings.poll_minutes,
+            "lookback_days": self._settings.lookback_days,
+            "obsidian_enabled": self._settings.obsidian_enabled,
+            "obsidian_output": str(self._settings.obsidian_output),
+            "progress_enabled": self._settings.progress_enabled,
+            "progress_output": str(self._settings.progress_output),
+            "progress_source": str(self._settings.progress_source or ""),
+            "config_path": str(CONFIG_PATH),
+            "research_enabled": self._settings.research_enabled,
+        }
+
+    def save_app_settings(self, payload: dict[str, object]) -> dict[str, object]:
+        authorization_code = str(payload.get("authorization_code") or "").strip()
+        try:
+            load_credential()
+            credential_configured = True
+        except RuntimeError:
+            credential_configured = False
+        if authorization_code:
+            save_credential(str(payload.get("email") or ""), authorization_code)
+            credential_configured = True
+        if not credential_configured:
+            raise ValueError("首次使用必须填写QQ邮箱和IMAP授权码。")
+
+        updated = settings_from_payload(self._settings, payload)
+        for label, enabled, path in (
+            ("Obsidian输出", updated.obsidian_enabled, updated.obsidian_output),
+            ("求职进展输出", updated.progress_enabled, updated.progress_output),
+        ):
+            if enabled and path.suffix.lower() != ".md":
+                raise ValueError(f"{label}必须是 .md 文件。")
+        if updated.progress_source and updated.progress_source.suffix.lower() != ".md":
+            raise ValueError("手动进展台账必须是 .md 文件。")
+        if updated.obsidian_enabled:
+            updated.obsidian_output.parent.mkdir(parents=True, exist_ok=True)
+        if updated.progress_enabled:
+            updated.progress_output.parent.mkdir(parents=True, exist_ok=True)
+        write_settings(updated)
+        self._settings = updated
+        self._export(MarkdownTaskStore(TASKS_DIR))
+        if self._on_settings_saved:
+            self._on_settings_saved(updated)
+        return self.get_app_settings()
+
+    def test_mail_settings(self, payload: dict[str, object]) -> dict[str, object]:
+        email = str(payload.get("email") or "").strip()
+        authorization_code = str(payload.get("authorization_code") or "").strip()
+        if not authorization_code:
+            try:
+                existing = load_credential()
+            except RuntimeError:
+                return {"ok": False, "detail": "请先填写IMAP授权码。"}
+            email = email or existing.email
+            authorization_code = existing.authorization_code
+        try:
+            temporary_settings = settings_from_payload(self._settings, payload)
+            snapshot = ImapReader(
+                temporary_settings,
+                MailCredential(email=email, authorization_code=authorization_code),
+            ).mailbox_snapshot()
+            return {
+                "ok": True,
+                "detail": f"只读连接成功，当前未读 {snapshot['unseen']} 封。",
+            }
+        except Exception as exc:
+            return {"ok": False, "detail": f"连接失败：{exc}"}
+
+    def select_markdown_path(self, kind: str) -> str:
+        if not self._window:
+            return ""
+        defaults = {
+            "obsidian_output": self._settings.obsidian_output,
+            "progress_output": self._settings.progress_output,
+            "progress_source": self._settings.progress_source
+            or self._settings.progress_output.with_name("求职进展台账.md"),
+        }
+        if kind not in defaults:
+            raise ValueError("不支持的路径类型")
+        default = defaults[kind]
+        selected = self._window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            directory=str(default.parent),
+            save_filename=default.name,
+            file_types=("Markdown (*.md)",),
+        )
+        return str(selected[0]) if selected else ""
+
+    def create_progress_source_template(self, path_value: str) -> dict[str, object]:
+        path = Path(path_value.strip())
+        if not path_value.strip() or path.suffix.lower() != ".md":
+            raise ValueError("请选择一个 .md 进展台账路径。")
+        created = create_progress_template(path)
+        return {"created": created, "path": str(path)}
 
     def update_status(self, task_id: str, status: str) -> dict[str, object]:
-        if status not in {
-            "needs_review",
-            "confirmed",
-            "planned",
-            "done",
-            "cancelled",
-            "irrelevant",
-        }:
-            raise ValueError("不支持的任务状态")
         store = MarkdownTaskStore(TASKS_DIR)
-        task = store.update_status(task_id, status)
-        if status in {"done", "cancelled", "irrelevant"}:
-            close_requests_for_task(
-                self.settings.research_queue,
-                task_id,
-                reason=f"task_status:{status}",
-            )
-            task.research_status = "closed"
-            store.save(task)
-        self._export(store)
+        apply_task_update(self._settings, task_id, {"status": status}, store=store)
         return self.get_dashboard()
 
     def snooze(self, task_id: str, until: str) -> dict[str, object]:
@@ -126,7 +350,7 @@ class DesktopApi:
         if not self._scan_lock.acquire(blocking=False):
             return {"status": "busy"}
         try:
-            return {"status": "ok", "summary": scan_once(self.settings).to_dict()}
+            return {"status": "ok", "summary": scan_once(self._settings).to_dict()}
         finally:
             self._scan_lock.release()
 
@@ -138,12 +362,20 @@ class DesktopApi:
         return True
 
     def open_obsidian(self, task_id: str) -> bool:
-        if self.settings.obsidian_enabled and self.settings.obsidian_output.exists():
-            _open_obsidian_uri(self.settings.obsidian_output)
+        if self._settings.obsidian_enabled and self._settings.obsidian_output.exists():
+            _open_obsidian_uri(self._settings.obsidian_output)
             return True
         task_path = MarkdownTaskStore(TASKS_DIR).path_for(task_id)
         if task_path.exists():
             _open_path(task_path)
+            return True
+        return False
+
+    def open_research(self, task_id: str) -> bool:
+        payload = request_states(self._settings.research_queue).get(task_id, {})
+        result_path = Path(str(payload.get("result_path") or ""))
+        if result_path.is_file():
+            _open_path(result_path)
             return True
         return False
 
@@ -156,91 +388,17 @@ class DesktopApi:
         self._export(store)
         return self.get_dashboard()
 
-    def create_paper(self, kind: str) -> dict[str, object]:
-        if not self.paper_manager:
-            raise RuntimeError("纸片管理器尚未初始化")
-        paper = self.paper_manager.create(kind)
-        return paper.to_dict()
-
-    def list_papers(self) -> list[dict[str, object]]:
-        if not self.paper_manager:
-            return []
-        return [paper.metadata() for paper in self.paper_manager.store.all()]
-
-    def get_paper(self, paper_id: str) -> dict[str, object]:
-        return PaperApi(self._require_paper_manager(), paper_id).get_paper()
-
-    def save_paper(
-        self,
-        paper_id: str,
-        payload: dict[str, object],
-    ) -> dict[str, object]:
-        return PaperApi(self._require_paper_manager(), paper_id).save_paper(payload)
-
-    def open_paper(self, paper_id: str) -> bool:
-        self._require_paper_manager().open(paper_id)
-        return True
-
-    def close_paper(self, paper_id: str) -> bool:
-        self._require_paper_manager().close(paper_id)
-        return True
-
-    def move_paper_to_trash(self, paper_id: str) -> bool:
-        self._require_paper_manager().trash(paper_id)
-        return True
-
-    def set_paper_capsule(self, paper_id: str, compact: bool) -> bool:
-        manager = self._require_paper_manager()
-        threading.Thread(
-            target=manager.set_capsule,
-            args=(paper_id, compact),
-            daemon=True,
-        ).start()
-        return True
-
-    def peek_paper_capsule(self, paper_id: str, reveal: bool) -> bool:
-        manager = self._require_paper_manager()
-        threading.Thread(
-            target=manager.peek_capsule,
-            args=(paper_id, reveal),
-            daemon=True,
-        ).start()
-        return True
-
-    def open_paper_external(self, paper_id: str) -> bool:
-        path = self._require_paper_manager().store.path_for(paper_id)
-        if not path.exists():
-            return False
-        _open_path(path)
-        return True
-
-    def save_note_image(self, data_url: str) -> str:
-        return self._require_paper_manager().images.save_data_url(data_url)
-
-    def get_note_image(self, reference: str) -> str | None:
-        return self._require_paper_manager().images.data_url(reference)
-
-    def get_preferences(self) -> dict[str, object]:
-        return load_preferences(PREFERENCES_FILE).to_dict()
-
-    def save_preferences(
-        self,
-        payload: dict[str, object],
-    ) -> dict[str, object]:
-        return update_preferences(PREFERENCES_FILE, payload).to_dict()
-
     def edit_task(
         self,
         task_id: str,
         payload: dict[str, object],
     ) -> dict[str, object]:
         store = MarkdownTaskStore(TASKS_DIR)
-        edit_task_fields(task_id, payload, store)
-        self._export(store)
+        apply_task_update(self._settings, task_id, payload, store=store)
         return self.get_dashboard()
 
     def set_capsule(self, compact: bool) -> bool:
-        if not self.window:
+        if not self._window:
             return False
         threading.Thread(
             target=self._apply_capsule_geometry,
@@ -249,461 +407,116 @@ class DesktopApi:
         ).start()
         return True
 
+    def set_editor_mode(self, enabled: bool) -> bool:
+        if not self._window:
+            return False
+        threading.Thread(
+            target=self._apply_editor_geometry,
+            args=(enabled,),
+            daemon=True,
+        ).start()
+        return True
+
+    def _apply_editor_geometry(self, enabled: bool) -> None:
+        if not self._window:
+            return
+        if enabled:
+            if self._editor_geometry is None:
+                self._editor_geometry = (
+                    self._window.x,
+                    self._window.y,
+                    self._window.width,
+                    self._window.height,
+                )
+            old_x, old_y, old_width, old_height = self._editor_geometry
+            width = max(EDITOR_WIDTH, old_width)
+            height = max(EDITOR_HEIGHT, old_height)
+            screens = list(webview.screens)
+            target_x = old_x - (width - old_width) // 2
+            target_y = old_y - (height - old_height) // 2
+            if screens:
+                center_x = old_x + old_width // 2
+                center_y = old_y + old_height // 2
+                screen = next(
+                    (
+                        item
+                        for item in screens
+                        if item.x <= center_x < item.x + item.width
+                        and item.y <= center_y < item.y + item.height
+                    ),
+                    screens[0],
+                )
+                width = min(width, screen.width - 32)
+                height = min(height, screen.height - 56)
+                target_x = max(
+                    screen.x + 16,
+                    min(target_x, screen.x + screen.width - width - 16),
+                )
+                target_y = max(
+                    screen.y + 28,
+                    min(target_y, screen.y + screen.height - height - 28),
+                )
+            self._window.resize(width, height)
+            self._window.move(target_x, target_y)
+        elif self._editor_geometry is not None:
+            x, y, width, height = self._editor_geometry
+            self._editor_geometry = None
+            self._window.resize(width, height)
+            self._window.move(x, y)
+
     def _apply_capsule_geometry(self, compact: bool) -> None:
-        if not self.window:
+        if not self._window:
             return
         if compact:
             self._expanded_geometry = (
-                self.window.x,
-                self.window.y,
-                self.window.width,
-                self.window.height,
+                self._window.x,
+                self._window.y,
+                self._window.width,
+                self._window.height,
             )
-            capsule_width, capsule_height = 40, 112
-            self.window.resize(capsule_width, capsule_height)
-            screens = list(webview.screens)
-            if screens:
-                center_x = self.window.x + capsule_width // 2
-                center_y = self.window.y + capsule_height // 2
-                screen = next(
-                    (
-                        candidate
-                        for candidate in screens
-                        if candidate.x <= center_x < candidate.x + candidate.width
-                        and candidate.y <= center_y < candidate.y + candidate.height
-                    ),
-                    min(
-                        screens,
-                        key=lambda candidate: abs(
-                            center_x - (candidate.x + candidate.width // 2)
-                        ),
-                    ),
-                )
-                left_distance = abs(self.window.x - screen.x)
-                right_distance = abs(
-                    screen.x + screen.width - (self.window.x + capsule_width)
-                )
-                on_left = left_distance <= right_distance
-                shown_x = (
-                    screen.x + 2
-                    if on_left
-                    else screen.x + screen.width - capsule_width - 2
-                )
-                hidden_x = (
-                    screen.x - capsule_width + 13
-                    if on_left
-                    else screen.x + screen.width - 13
-                )
-                target_y = max(
-                    screen.y + 36,
-                    min(
-                        self.window.y,
-                        screen.y + screen.height - capsule_height - 48,
-                    ),
-                )
-                self._capsule_positions = (hidden_x, shown_x, target_y)
-                self.window.move(hidden_x, target_y)
+            capsule_width, capsule_height = CAPSULE_WIDTH, CAPSULE_HEIGHT
+            self._window.resize(capsule_width, capsule_height)
+            self._capsule_positions = _capsule_anchor(
+                self._window.x,
+                self._window.y,
+            )
+            hidden_x, _, target_y = self._capsule_positions
+            self._window.move(hidden_x, target_y)
         else:
+            if self._capsule_snap_timer:
+                self._capsule_snap_timer.cancel()
+                self._capsule_snap_timer = None
             self._capsule_positions = None
             if self._expanded_geometry:
                 x, y, width, height = self._expanded_geometry
-                self.window.resize(width, height)
-                self.window.move(x, y)
+                self._window.resize(width, height)
+                self._window.move(x, y)
             else:
-                self.window.resize(self.settings.ui_width, self.settings.ui_height)
+                self._window.resize(self._settings.ui_width, self._settings.ui_height)
 
-    def peek_capsule(self, reveal: bool) -> bool:
-        if not self.window or not self._capsule_positions:
-            return False
-        def move() -> None:
-            if not self.window or not self._capsule_positions:
+    def on_window_moved(self, x: int, y: int) -> None:
+        if self._capsule_positions:
+            self._capsule_positions = _capsule_anchor(x, y)
+            hidden_x, _, target_y = self._capsule_positions
+            if abs(x - hidden_x) <= 1 and abs(y - target_y) <= 1:
                 return
-            hidden_x, shown_x, y = self._capsule_positions
-            self.window.move(shown_x if reveal else hidden_x, y)
+            if self._capsule_snap_timer:
+                self._capsule_snap_timer.cancel()
+            self._capsule_snap_timer = threading.Timer(
+                0.25,
+                self._snap_capsule_after_drag,
+            )
+            self._capsule_snap_timer.daemon = True
+            self._capsule_snap_timer.start()
 
-        threading.Thread(target=move, daemon=True).start()
-        return True
+    def _snap_capsule_after_drag(self) -> None:
+        if not self._window or not self._capsule_positions:
+            return
+        hidden_x, _, target_y = self._capsule_positions
+        self._window.move(hidden_x, target_y)
 
     def _export(self, store: MarkdownTaskStore) -> None:
-        tasks = store.all()
-        export_dashboard(tasks, DASHBOARD_FILE, self.settings)
-        if self.settings.obsidian_enabled:
-            export_dashboard(tasks, self.settings.obsidian_output, self.settings)
-
-    def _require_paper_manager(self) -> "PaperWindowManager":
-        if not self.paper_manager:
-            raise RuntimeError("纸片管理器尚未初始化")
-        return self.paper_manager
-
-
-class PaperApi:
-    def __init__(self, manager: "PaperWindowManager", paper_id: str) -> None:
-        self.manager = manager
-        self.paper_id = paper_id
-
-    def get_paper(self) -> dict[str, object]:
-        paper = self.manager.store.load(self.paper_id)
-        if not paper:
-            raise KeyError(self.paper_id)
-        payload = paper.to_dict()
-        payload["preferences"] = load_preferences(PREFERENCES_FILE).to_dict()
-        payload["notes"] = [
-            item.metadata()
-            for item in self.manager.store.all()
-            if item.kind == "note" and item.id != self.paper_id
-        ]
-        return payload
-
-    def save_paper(self, payload: dict[str, object]) -> dict[str, object]:
-        paper = self.manager.store.update(
-            self.paper_id,
-            body=str(payload.get("body") or ""),
-            title=str(payload.get("title") or "未命名纸片"),
-            theme=str(payload.get("theme") or "warm"),
-            linked_task_ids=list(payload.get("linked_task_ids") or []),
-        )
-        window = self.manager.windows.get(self.paper_id)
-        if window:
-            window.set_title(f"{paper.title} · JobMailDesk")
-        return paper.to_dict()
-
-    def create_paper(self, kind: str) -> dict[str, object]:
-        return self.manager.create(kind).to_dict()
-
-    def open_paper(self, paper_id: str) -> bool:
-        self.manager.open(paper_id)
-        return True
-
-    def close_paper(self) -> bool:
-        self.manager.close(self.paper_id)
-        return True
-
-    def move_to_trash(self) -> bool:
-        self.manager.trash(self.paper_id)
-        return True
-
-    def set_capsule(self, compact: bool) -> bool:
-        threading.Thread(
-            target=self.manager.set_capsule,
-            args=(self.paper_id, compact),
-            daemon=True,
-        ).start()
-        return True
-
-    def peek_capsule(self, reveal: bool) -> bool:
-        threading.Thread(
-            target=self.manager.peek_capsule,
-            args=(self.paper_id, reveal),
-            daemon=True,
-        ).start()
-        return True
-
-    def open_external(self) -> bool:
-        path = self.manager.store.path_for(self.paper_id)
-        if not path.exists():
-            return False
-        _open_path(path)
-        return True
-
-    def save_image(self, data_url: str) -> str:
-        return self.manager.images.save_data_url(data_url)
-
-    def get_image(self, reference: str) -> str | None:
-        return self.manager.images.data_url(reference)
-
-    def get_preferences(self) -> dict[str, object]:
-        return load_preferences(PREFERENCES_FILE).to_dict()
-
-    def save_preferences(
-        self,
-        payload: dict[str, object],
-    ) -> dict[str, object]:
-        return update_preferences(PREFERENCES_FILE, payload).to_dict()
-
-
-class StandalonePaperApi:
-    def __init__(self, settings: Settings, paper_id: str) -> None:
-        self.settings = settings
-        self.paper_id = paper_id
-        self.store = PaperStore(PAPERS_DIR, PAPER_BACKUPS_DIR, TRASH_DIR)
-        self.images = NoteImageStore(NOTE_ASSETS_DIR)
-        self.window: Any = None
-        self.expanded_geometry: tuple[int, int, int, int] | None = None
-        self.capsule_positions: tuple[int, int, int] | None = None
-
-    def _check_id(self, paper_id: str) -> None:
-        if paper_id != self.paper_id:
-            raise PermissionError("纸片窗口只能访问自己的 Markdown")
-
-    def get_paper(self, paper_id: str) -> dict[str, object]:
-        self._check_id(paper_id)
-        paper = self.store.load(paper_id)
-        if not paper:
-            raise KeyError(paper_id)
-        payload = paper.to_dict()
-        payload["preferences"] = load_preferences(PREFERENCES_FILE).to_dict()
-        payload["notes"] = [
-            item.metadata()
-            for item in self.store.all()
-            if item.kind == "note" and item.id != paper_id
-        ]
-        return payload
-
-    def save_paper(
-        self,
-        paper_id: str,
-        payload: dict[str, object],
-    ) -> dict[str, object]:
-        self._check_id(paper_id)
-        paper = self.store.update(
-            paper_id,
-            body=str(payload.get("body") or ""),
-            title=str(payload.get("title") or "未命名纸片"),
-            theme=str(payload.get("theme") or "warm"),
-            linked_task_ids=list(payload.get("linked_task_ids") or []),
-        )
-        if self.window:
-            self.window.set_title(f"{paper.title} · JobMailDesk")
-        return paper.to_dict()
-
-    def create_paper(self, kind: str) -> dict[str, object]:
-        if kind not in {"todo", "note"}:
-            raise ValueError("纸片类型必须是 todo 或 note")
-        paper = self.store.create(
-            kind,  # type: ignore[arg-type]
-            theme=load_preferences(PREFERENCES_FILE).theme,
-        )
-        _spawn_paper_process(paper.id)
-        return paper.to_dict()
-
-    def open_paper(self, paper_id: str) -> bool:
-        if not self.store.load(paper_id):
-            return False
-        _spawn_paper_process(paper_id)
-        return True
-
-    def close_paper(self, paper_id: str) -> bool:
-        self._check_id(paper_id)
-        if self.window:
-            threading.Thread(target=self.window.destroy, daemon=True).start()
-        return True
-
-    def move_paper_to_trash(self, paper_id: str) -> bool:
-        self._check_id(paper_id)
-        self.store.move_to_trash(paper_id)
-        if self.window:
-            threading.Thread(target=self.window.destroy, daemon=True).start()
-        return True
-
-    def set_paper_capsule(self, paper_id: str, compact: bool) -> bool:
-        self._check_id(paper_id)
-        threading.Thread(
-            target=self._apply_capsule,
-            args=(compact,),
-            daemon=True,
-        ).start()
-        return True
-
-    def _apply_capsule(self, compact: bool) -> None:
-        if not self.window:
-            return
-        if compact:
-            self.expanded_geometry = (
-                self.window.x,
-                self.window.y,
-                self.window.width,
-                self.window.height,
-            )
-            width, height = 40, 112
-            self.window.resize(width, height)
-            if not load_preferences(PREFERENCES_FILE).auto_snap_capsules:
-                return
-            screens = list(webview.screens)
-            if not screens:
-                return
-            center_x = self.window.x + width // 2
-            center_y = self.window.y + height // 2
-            screen = next(
-                (
-                    candidate
-                    for candidate in screens
-                    if candidate.x <= center_x < candidate.x + candidate.width
-                    and candidate.y <= center_y < candidate.y + candidate.height
-                ),
-                screens[0],
-            )
-            left = abs(self.window.x - screen.x) <= abs(
-                screen.x + screen.width - (self.window.x + width)
-            )
-            shown_x = screen.x + 2 if left else screen.x + screen.width - width - 2
-            hidden_x = screen.x - width + 13 if left else screen.x + screen.width - 13
-            y = max(
-                screen.y + 42,
-                min(self.window.y, screen.y + screen.height - height - 48),
-            )
-            self.capsule_positions = (hidden_x, shown_x, y)
-            self.window.move(hidden_x, y)
-        else:
-            self.capsule_positions = None
-            if self.expanded_geometry:
-                x, y, width, height = self.expanded_geometry
-                self.window.resize(width, height)
-                self.window.move(x, y)
-            else:
-                self.window.resize(360, 500)
-
-    def peek_paper_capsule(self, paper_id: str, reveal: bool) -> bool:
-        self._check_id(paper_id)
-        if not self.window or not self.capsule_positions:
-            return False
-
-        def move() -> None:
-            if not self.window or not self.capsule_positions:
-                return
-            hidden_x, shown_x, y = self.capsule_positions
-            self.window.move(shown_x if reveal else hidden_x, y)
-
-        threading.Thread(target=move, daemon=True).start()
-        return True
-
-    def open_paper_external(self, paper_id: str) -> bool:
-        self._check_id(paper_id)
-        path = self.store.path_for(paper_id)
-        if not path.exists():
-            return False
-        _open_path(path)
-        return True
-
-    def save_note_image(self, data_url: str) -> str:
-        return self.images.save_data_url(data_url)
-
-    def get_note_image(self, reference: str) -> str | None:
-        return self.images.data_url(reference)
-
-    def get_preferences(self) -> dict[str, object]:
-        return load_preferences(PREFERENCES_FILE).to_dict()
-
-    def save_preferences(
-        self,
-        payload: dict[str, object],
-    ) -> dict[str, object]:
-        return update_preferences(PREFERENCES_FILE, payload).to_dict()
-
-
-class PaperWindowManager:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.store = PaperStore(PAPERS_DIR, PAPER_BACKUPS_DIR, TRASH_DIR)
-        self.images = NoteImageStore(NOTE_ASSETS_DIR)
-        self.windows: dict[str, Any] = {}
-        self.processes: dict[str, subprocess.Popen[bytes]] = {}
-        self.expanded_geometry: dict[str, tuple[int, int, int, int]] = {}
-        self.compact: set[str] = set()
-        self.capsule_positions: dict[str, tuple[int, int, int]] = {}
-        self.desktop_api: DesktopApi | None = None
-
-    def create(self, kind: str):
-        if kind not in {"todo", "note"}:
-            raise ValueError("纸片类型必须是 todo 或 note")
-        preferences = load_preferences(PREFERENCES_FILE)
-        paper = self.store.create(
-            kind,  # type: ignore[arg-type]
-            theme=preferences.theme,
-        )
-        self.open(paper.id)
-        return paper
-
-    def open(self, paper_id: str) -> Any:
-        existing = self.processes.get(paper_id)
-        if existing and existing.poll() is None:
-            return existing
-        paper = self.store.load(paper_id)
-        if not paper:
-            raise KeyError(paper_id)
-        process = _spawn_paper_process(paper_id)
-        self.processes[paper_id] = process
-        return process
-
-    def close(self, paper_id: str) -> None:
-        process = self.processes.pop(paper_id, None)
-        if process and process.poll() is None:
-            process.terminate()
-
-    def trash(self, paper_id: str) -> None:
-        self.store.move_to_trash(paper_id)
-        self.close(paper_id)
-
-    def close_all(self) -> None:
-        for paper_id in list(self.processes):
-            self.close(paper_id)
-
-    def set_capsule(self, paper_id: str, compact: bool) -> None:
-        window = self.windows.get(paper_id)
-        if not window:
-            return
-        if compact:
-            self.expanded_geometry[paper_id] = (
-                window.x,
-                window.y,
-                window.width,
-                window.height,
-            )
-            window.resize(40, 112)
-            self.compact.add(paper_id)
-            self._snap_capsules(paper_id, window)
-        else:
-            self.compact.discard(paper_id)
-            self.capsule_positions.pop(paper_id, None)
-            geometry = self.expanded_geometry.get(paper_id)
-            if geometry:
-                x, y, width, height = geometry
-                window.resize(width, height)
-                window.move(x, y)
-            else:
-                window.resize(360, 500)
-
-    def peek_capsule(self, paper_id: str, reveal: bool) -> None:
-        window = self.windows.get(paper_id)
-        positions = self.capsule_positions.get(paper_id)
-        if not window or not positions:
-            return
-        hidden_x, shown_x, y = positions
-        window.move(shown_x if reveal else hidden_x, y)
-
-    def _snap_capsules(self, paper_id: str, active_window: Any) -> None:
-        if not load_preferences(PREFERENCES_FILE).auto_snap_capsules:
-            return
-        screens = list(webview.screens)
-        if not screens:
-            return
-        center_x = active_window.x + active_window.width // 2
-        center_y = active_window.y + active_window.height // 2
-        screen = next(
-            (
-                candidate
-                for candidate in screens
-                if candidate.x <= center_x < candidate.x + candidate.width
-                and candidate.y <= center_y < candidate.y + candidate.height
-            ),
-            screens[0],
-        )
-        left = abs(active_window.x - screen.x) <= abs(
-            screen.x + screen.width - (active_window.x + active_window.width)
-        )
-        same_side = [
-            (paper_id, window)
-            for paper_id, window in self.windows.items()
-            if paper_id in self.compact and window is not active_window
-        ]
-        queue_index = len(same_side)
-        shown_x = screen.x + 2 if left else screen.x + screen.width - 42
-        hidden_x = screen.x - 27 if left else screen.x + screen.width - 13
-        y = min(
-            screen.y + screen.height - 148,
-            max(screen.y + 42, active_window.y) + queue_index * 120,
-        )
-        self.capsule_positions[paper_id] = (hidden_x, shown_x, y)
-        active_window.move(hidden_x, y)
+        sync_outputs(self._settings, store)
 
 
 def _tray_image() -> Image.Image:
@@ -722,34 +535,36 @@ def _tray_image() -> Image.Image:
     return image
 
 
-def run_paper_ui(settings: Settings, paper_id: str) -> None:
-    store = PaperStore(PAPERS_DIR, PAPER_BACKUPS_DIR, TRASH_DIR)
-    paper = store.load(paper_id)
-    if not paper:
-        raise KeyError(paper_id)
-    api = StandalonePaperApi(settings, paper_id)
-    window = webview.create_window(
-        f"{paper.title} · JobMailDesk",
-        _paper_url(paper_id),
-        js_api=api,
-        width=360,
-        height=500,
-        min_size=(40, 86),
-        frameless=True,
-        easy_drag=False,
-        on_top=True,
-        background_color="#f4efe5",
-    )
-    api.window = window
-    webview.start(debug=False, private_mode=False)
 
+def _run_ui_primary(settings: Settings) -> None:
+    scheduler_holder: dict[str, Any] = {"value": None}
+    scheduler_lock = threading.Lock()
 
-def run_ui(settings: Settings, initial_paper: str | None = None) -> None:
-    paper_manager = PaperWindowManager(settings)
-    api = DesktopApi(settings, paper_manager)
-    paper_manager.desktop_api = api
-    scheduler = create_background_scheduler(settings)
-    scheduler.start()
+    def stop_scheduler() -> None:
+        with scheduler_lock:
+            current = scheduler_holder["value"]
+            scheduler_holder["value"] = None
+        if not current:
+            return
+        try:
+            current.shutdown(wait=False)
+        except SchedulerNotRunningError:
+            pass
+
+    def apply_runtime_settings(updated: Settings) -> None:
+        stop_scheduler()
+        scheduler = create_background_scheduler(updated)
+        scheduler.start()
+        with scheduler_lock:
+            scheduler_holder["value"] = scheduler
+
+    api = DesktopApi(settings, on_settings_saved=apply_runtime_settings)
+    try:
+        load_credential()
+    except RuntimeError:
+        pass
+    else:
+        apply_runtime_settings(settings)
     window = webview.create_window(
         "JobMailDesk",
         _resource("index.html").as_uri(),
@@ -760,10 +575,12 @@ def run_ui(settings: Settings, initial_paper: str | None = None) -> None:
         on_top=settings.always_on_top,
         background_color="#f6f0e6",
         easy_drag=False,
-        min_size=(42, 100),
+        min_size=(36, 82),
         hidden=settings.start_hidden,
     )
-    api.window = window
+    api._window = window
+    window.events.moved += api.on_window_moved
+    window.events.before_show += lambda: _hide_from_task_switcher(window)
     paused = {"value": False}
 
     def show() -> None:
@@ -776,6 +593,9 @@ def run_ui(settings: Settings, initial_paper: str | None = None) -> None:
         threading.Thread(target=api.trigger_scan, daemon=True).start()
 
     def toggle_pause() -> None:
+        scheduler = scheduler_holder["value"]
+        if not scheduler:
+            return
         paused["value"] = not paused["value"]
         for job_id in ("mail-poll", "hourly-refresh"):
             if paused["value"]:
@@ -784,52 +604,66 @@ def run_ui(settings: Settings, initial_paper: str | None = None) -> None:
                 scheduler.resume_job(job_id)
 
     def open_obsidian() -> None:
-        target = settings.obsidian_output if settings.obsidian_enabled else DASHBOARD_FILE
+        target = (
+            api._settings.obsidian_output
+            if api._settings.obsidian_enabled
+            else DASHBOARD_FILE
+        )
         if target.exists():
-            if settings.obsidian_enabled:
+            if api._settings.obsidian_enabled:
                 _open_obsidian_uri(target)
             else:
                 _open_path(target)
 
-    def new_paper(kind: str) -> None:
-        paper_manager.create(kind)
+    def open_settings() -> None:
+        window.show()
+        window.evaluate_js(
+            "setCapsule(false).then(() => "
+            "window.openSettingsDialog && window.openSettingsDialog(false))"
+        )
 
     def quit_app(icon: Icon, _item: MenuItem | None = None) -> None:
-        scheduler.shutdown(wait=False)
-        paper_manager.close_all()
+        stop_scheduler()
         icon.stop()
         window.destroy()
 
-    tray = Icon(
-        "JobMailDesk",
-        _tray_image(),
-        "JobMailDesk",
-        Menu(
-            MenuItem("显示", lambda _icon, _item: show(), default=True),
-            MenuItem("隐藏", lambda _icon, _item: hide()),
-            MenuItem("立即扫描", lambda _icon, _item: scan()),
-            MenuItem("新建待办纸", lambda _icon, _item: new_paper("todo")),
-            MenuItem("新建笔记纸", lambda _icon, _item: new_paper("note")),
-            MenuItem(
-                lambda _item: "恢复扫描" if paused["value"] else "暂停扫描",
-                lambda _icon, _item: toggle_pause(),
-                checked=lambda _item: paused["value"],
+    tray: Icon | None = None
+    if sys.platform == "win32":
+        tray = Icon(
+            "JobMailDesk",
+            _tray_image(),
+            "JobMailDesk",
+            Menu(
+                MenuItem("显示", lambda _icon, _item: show(), default=True),
+                MenuItem("隐藏", lambda _icon, _item: hide()),
+                MenuItem("立即扫描", lambda _icon, _item: scan()),
+                MenuItem(
+                    lambda _item: "恢复扫描" if paused["value"] else "暂停扫描",
+                    lambda _icon, _item: toggle_pause(),
+                    checked=lambda _item: paused["value"],
+                ),
+                MenuItem("设置", lambda _icon, _item: open_settings()),
+                MenuItem("打开 Obsidian", lambda _icon, _item: open_obsidian()),
+                MenuItem("退出", quit_app),
             ),
-            MenuItem("打开 Obsidian", lambda _icon, _item: open_obsidian()),
-            MenuItem("退出", quit_app),
-        ),
-    )
-    threading.Thread(target=tray.run, daemon=True).start()
-
-    def restore_papers() -> None:
-        for paper in paper_manager.store.all():
-            paper_manager.open(paper.id)
-        if initial_paper in {"todo", "note"}:
-            paper_manager.create(initial_paper)
+        )
+        threading.Thread(target=tray.run, daemon=True).start()
 
     try:
-        webview.start(restore_papers, debug=False, private_mode=False)
+        webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
+        webview.start(debug=False, private_mode=False)
     finally:
-        scheduler.shutdown(wait=False)
-        paper_manager.close_all()
-        tray.stop()
+        stop_scheduler()
+        if tray:
+            tray.stop()
+
+
+def run_ui(settings: Settings) -> None:
+    instance_handle, is_primary = _claim_single_instance()
+    if not is_primary:
+        show_existing_window(wait_seconds=5)
+        return
+    try:
+        _run_ui_primary(settings)
+    finally:
+        _close_instance_handle(instance_handle)

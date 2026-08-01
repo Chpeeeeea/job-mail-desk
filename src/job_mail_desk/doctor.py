@@ -27,12 +27,15 @@ def run_doctor(settings: Settings, *, online: bool = True) -> list[Check]:
             not settings.obsidian_enabled or settings.obsidian_output.parent.exists(),
             str(settings.obsidian_output),
         ),
-        Check(
-            "OpenCLI",
-            shutil.which("opencli") is not None,
-            shutil.which("opencli") or "未找到；仅影响公开研究自动化",
-        ),
     ]
+    if settings.research_enabled:
+        checks.append(
+            Check(
+                "OpenCLI",
+                shutil.which("opencli") is not None,
+                shutil.which("opencli") or "未找到；仅影响公开研究自动化",
+            )
+        )
     if online:
         try:
             reader = ImapReader(settings, load_credential())

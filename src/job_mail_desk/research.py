@@ -97,6 +97,22 @@ def pending_requests(path: Path) -> list[dict[str, object]]:
     return results
 
 
+def request_states(path: Path) -> dict[str, dict[str, object]]:
+    """Return the latest persisted research state for each task."""
+    if not path.exists():
+        return {}
+    states: dict[str, dict[str, object]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        task_id = str(payload.get("task_id") or "")
+        if task_id:
+            states[task_id] = payload
+    return states
+
+
 def close_requests_for_task(
     path: Path,
     task_id: str,

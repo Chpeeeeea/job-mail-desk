@@ -17,11 +17,16 @@ include_sender = false
 include_private_links = false
 
 [research]
-enabled = true
+enabled = false
 queue_path = ""
 
+[progress]
+enabled = false
+output_path = ""
+source_path = ""
+
 [ui]
-width = 390
-height = 620
+width = 480
+height = 740
 always_on_top = true
 start_hidden = false

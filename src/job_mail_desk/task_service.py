@@ -83,12 +83,16 @@ def _priority(event: ParsedEvent, now: datetime) -> str:
 
 
 def _merge(existing: JobTask, event: ParsedEvent, now: datetime) -> JobTask:
+    previous_event_type = existing.event_type
     existing.company = event.company or existing.company
     existing.role = event.role or existing.role
     existing.recruiting_project = (
         event.recruiting_project or existing.recruiting_project
     )
     existing.received_at = max(existing.received_at, event.source_received_at)
+    existing.event_type = event.event_type
+    existing.stage = event.stage
+    existing.round = event.round or existing.round
     existing.start_at = event.start_at or existing.start_at
     existing.end_at = event.end_at or existing.end_at
     existing.deadline_at = event.deadline_at or existing.deadline_at
@@ -101,10 +105,19 @@ def _merge(existing: JobTask, event: ParsedEvent, now: datetime) -> JobTask:
     existing.source_sender = event.source_sender
     existing.source_url = event.source_url or existing.source_url
     existing.updated_at = now
+    has_schedule = bool(event.start_at or event.end_at or event.deadline_at)
     if event.change_type == "cancel":
         existing.status = "cancelled"
-    elif existing.status in {"cancelled", "expired", "irrelevant"}:
-        existing.status = "needs_review"
+    elif previous_event_type == "rejection" and event.event_type != "rejection":
+        existing.status = "planned" if has_schedule else "needs_review"
+    elif existing.status == "irrelevant":
+        pass
+    elif existing.status in {"cancelled", "expired"}:
+        existing.status = "planned" if has_schedule else "needs_review"
+    elif existing.status in {"new", "needs_review", "confirmed"} and has_schedule:
+        existing.status = "planned"
+    elif event.event_type == "application" and existing.status == "needs_review":
+        existing.status = "confirmed"
     return existing
 
 
@@ -115,6 +128,17 @@ def task_from_event(
     now: datetime | None = None,
 ) -> JobTask:
     current = (now or datetime.now(SHANGHAI)).astimezone(SHANGHAI)
+    source_hash = message_hash(event.source_message_id)
+    source_match = next(
+        (
+            task
+            for task in store.all()
+            if task.source_message_hash == source_hash
+        ),
+        None,
+    )
+    if source_match:
+        return _merge(source_match, event, current)
     resolved_application_id = _resolve_application_id(event, store)
     identifier = task_id(event, resolved_application_id)
     existing = store.load(identifier)
@@ -125,8 +149,14 @@ def task_from_event(
         status = "cancelled"
     elif event.event_type == "rejection":
         status = "done"
+    elif event.event_type == "application":
+        status = "confirmed"
     else:
-        status = "needs_review"
+        status = (
+            "planned"
+            if event.start_at or event.end_at or event.deadline_at
+            else "needs_review"
+        )
     title = re.sub(r"\s+", " ", event.title).strip()
     return JobTask(
         id=identifier,
@@ -203,18 +233,50 @@ def create_manual_task(
     action = redact_text(
         str(payload.get("action_summary") or "处理这项求职待办")
     )[:240]
+    stage = redact_text(str(payload.get("stage") or "自定义待办"))[:40]
+    round_label = redact_text(str(payload.get("round") or "")).strip()[:30] or None
+    app_id = _slug_hash(
+        f"manual|{company}|{role or 'unknown'}|{project or 'personal'}",
+        20,
+    )
+    event_day = (start or deadline).date() if start or deadline else None
+    if event_day:
+        for existing in store.all():
+            existing_target = existing.start_at or existing.deadline_at
+            if (
+                existing.event_type == "manual"
+                and existing.status not in {"cancelled", "irrelevant"}
+                and existing.company.casefold() == company.casefold()
+                and (existing.role or "").casefold() == (role or "").casefold()
+                and existing.stage.casefold() == stage.casefold()
+                and existing_target
+                and existing_target.date() == event_day
+            ):
+                existing.recruiting_project = project
+                existing.round = round_label
+                existing.start_at = start
+                existing.end_at = end
+                existing.deadline_at = deadline
+                existing.priority = _manual_priority(start, deadline, current)  # type: ignore[assignment]
+                existing.status = "planned" if start or deadline else "needs_review"
+                existing.change_type = "update"
+                existing.title = action
+                existing.action_summary = action
+                existing.manual_notes = redact_text(
+                    str(payload.get("manual_notes") or "")
+                )[:2000]
+                existing.updated_at = current
+                store.save(existing)
+                return existing
     task = JobTask(
         id=uuid.uuid4().hex[:24],
-        application_id=_slug_hash(
-            f"manual|{company}|{role or 'unknown'}|{project or 'personal'}",
-            20,
-        ),
+        application_id=app_id,
         company=company,
         role=role,
         recruiting_project=project,
         event_type="manual",
-        stage=redact_text(str(payload.get("stage") or "自定义待办"))[:40],
-        round=redact_text(str(payload.get("round") or "")).strip()[:30] or None,
+        stage=stage,
+        round=round_label,
         received_at=current,
         start_at=start,
         end_at=end,
@@ -284,5 +346,6 @@ def edit_task_fields(
         current,
     )  # type: ignore[assignment]
     task.updated_at = current
+    task.change_type = "update"
     store.save(task)
     return task

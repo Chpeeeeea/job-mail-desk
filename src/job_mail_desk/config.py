@@ -1,14 +1,25 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
 APP_NAME = "JobMailDesk"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-LOCAL_ROOT = Path(os.environ.get("LOCALAPPDATA", PROJECT_ROOT / "local")) / APP_NAME
+
+
+def _local_root() -> Path:
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", PROJECT_ROOT / "local")) / APP_NAME
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_NAME
+
+
+LOCAL_ROOT = _local_root()
 CONFIG_PATH = LOCAL_ROOT / "config.toml"
 TASKS_DIR = LOCAL_ROOT / "tasks"
 DIGESTS_DIR = LOCAL_ROOT / "digests"
@@ -16,17 +27,9 @@ LOG_DIR = LOCAL_ROOT / "logs"
 STATE_DB = LOCAL_ROOT / "state.db"
 RESEARCH_QUEUE = LOCAL_ROOT / "research-queue.jsonl"
 DASHBOARD_FILE = LOCAL_ROOT / "JobMailDesk.md"
-PAPERS_DIR = LOCAL_ROOT / "papers"
-PAPER_BACKUPS_DIR = LOCAL_ROOT / "paper-backups"
-NOTE_ASSETS_DIR = LOCAL_ROOT / "note-assets"
-TRASH_DIR = LOCAL_ROOT / "trash"
-PREFERENCES_FILE = LOCAL_ROOT / "preferences.json"
-WINDOW_STATE_FILE = LOCAL_ROOT / "window-state.json"
-DEFAULT_OBSIDIAN_OUTPUT = Path(
-    os.environ.get("USERPROFILE", str(LOCAL_ROOT.parent))
-) / Path(
-    r"iCloudDrive\iCloud~md~obsidian\Mobile\求职硬截止待办集.md"
-)
+DASHBOARD_CACHE = LOCAL_ROOT / "dashboard-cache.json"
+DEFAULT_OBSIDIAN_OUTPUT = LOCAL_ROOT / "求职硬截止待办集.md"
+DEFAULT_PROGRESS_OUTPUT = LOCAL_ROOT / "求职当前进展.md"
 
 
 @dataclass(frozen=True)
@@ -39,14 +42,17 @@ class Settings:
     hourly_minute: int = 0
     digest_times: tuple[str, ...] = ("08:00", "13:00", "20:00")
     timezone: str = "Asia/Shanghai"
-    obsidian_enabled: bool = True
+    obsidian_enabled: bool = False
     obsidian_output: Path = DEFAULT_OBSIDIAN_OUTPUT
     include_sender: bool = False
     include_private_links: bool = False
-    research_enabled: bool = True
+    progress_enabled: bool = False
+    progress_output: Path = DEFAULT_PROGRESS_OUTPUT
+    progress_source: Path | None = None
+    research_enabled: bool = False
     research_queue: Path = RESEARCH_QUEUE
-    ui_width: int = 390
-    ui_height: int = 620
+    ui_width: int = 480
+    ui_height: int = 740
     always_on_top: bool = True
     start_hidden: bool = False
 
@@ -57,10 +63,6 @@ def ensure_directories() -> None:
         TASKS_DIR,
         DIGESTS_DIR,
         LOG_DIR,
-        PAPERS_DIR,
-        PAPER_BACKUPS_DIR,
-        NOTE_ASSETS_DIR,
-        TRASH_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
 
@@ -81,18 +83,23 @@ digest_times = ["08:00", "13:00", "20:00"]
 timezone = "Asia/Shanghai"
 
 [obsidian]
-enabled = true
+enabled = false
 output_path = "{output}"
 include_sender = false
 include_private_links = false
 
 [research]
-enabled = true
+enabled = false
 queue_path = "{queue}"
 
+[progress]
+enabled = false
+output_path = "{str(DEFAULT_PROGRESS_OUTPUT).replace(chr(92), chr(92) * 2)}"
+source_path = ""
+
 [ui]
-width = 390
-height = 620
+width = 480
+height = 740
 always_on_top = true
 start_hidden = false
 """
@@ -115,6 +122,7 @@ def load_settings(path: Path | None = None) -> Settings:
     schedule = payload.get("schedule", {})
     obsidian = payload.get("obsidian", {})
     research = payload.get("research", {})
+    progress = payload.get("progress", {})
     ui = payload.get("ui", {})
     return Settings(
         mail_host=str(mail.get("host", "imap.qq.com")),
@@ -131,10 +139,91 @@ def load_settings(path: Path | None = None) -> Settings:
         ),
         include_sender=bool(obsidian.get("include_sender", False)),
         include_private_links=bool(obsidian.get("include_private_links", False)),
-        research_enabled=bool(research.get("enabled", True)),
+        progress_enabled=bool(progress.get("enabled", False)),
+        progress_output=Path(
+            str(progress.get("output_path") or DEFAULT_PROGRESS_OUTPUT)
+        ),
+        progress_source=(
+            Path(str(progress.get("source_path")))
+            if progress.get("source_path")
+            else None
+        ),
+        research_enabled=bool(research.get("enabled", False)),
         research_queue=Path(str(research.get("queue_path") or RESEARCH_QUEUE)),
-        ui_width=int(ui.get("width", 390)),
-        ui_height=int(ui.get("height", 620)),
+        ui_width=int(ui.get("width", 480)),
+        ui_height=int(ui.get("height", 740)),
         always_on_top=bool(ui.get("always_on_top", True)),
         start_hidden=bool(ui.get("start_hidden", False)),
+    )
+
+
+def _toml_string(value: str | Path) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def write_settings(settings: Settings, path: Path = CONFIG_PATH) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    digests = ", ".join(f'"{item}"' for item in settings.digest_times)
+    source = _toml_string(settings.progress_source or "")
+    text = f'''[mail]
+host = "{_toml_string(settings.mail_host)}"
+port = {settings.mail_port}
+folder = "{_toml_string(settings.mail_folder)}"
+lookback_days = {settings.lookback_days}
+poll_minutes = {settings.poll_minutes}
+
+[schedule]
+hourly_minute = {settings.hourly_minute}
+digest_times = [{digests}]
+timezone = "{_toml_string(settings.timezone)}"
+
+[obsidian]
+enabled = {str(settings.obsidian_enabled).lower()}
+output_path = "{_toml_string(settings.obsidian_output)}"
+include_sender = {str(settings.include_sender).lower()}
+include_private_links = {str(settings.include_private_links).lower()}
+
+[research]
+enabled = {str(settings.research_enabled).lower()}
+queue_path = "{_toml_string(settings.research_queue)}"
+
+[progress]
+enabled = {str(settings.progress_enabled).lower()}
+output_path = "{_toml_string(settings.progress_output)}"
+source_path = "{source}"
+
+[ui]
+width = {settings.ui_width}
+height = {settings.ui_height}
+always_on_top = {str(settings.always_on_top).lower()}
+start_hidden = {str(settings.start_hidden).lower()}
+'''
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
+    return path
+
+
+def settings_from_payload(
+    current: Settings,
+    payload: dict[str, object],
+) -> Settings:
+    poll_minutes = max(5, min(120, int(payload.get("poll_minutes") or 10)))
+    lookback_days = max(1, min(30, int(payload.get("lookback_days") or 3)))
+    obsidian_output = Path(
+        str(payload.get("obsidian_output") or current.obsidian_output)
+    )
+    progress_output = Path(
+        str(payload.get("progress_output") or current.progress_output)
+    )
+    progress_source_value = str(payload.get("progress_source") or "").strip()
+    return replace(
+        current,
+        poll_minutes=poll_minutes,
+        lookback_days=lookback_days,
+        obsidian_enabled=bool(payload.get("obsidian_enabled", False)),
+        obsidian_output=obsidian_output,
+        progress_enabled=bool(payload.get("progress_enabled", False)),
+        progress_output=progress_output,
+        progress_source=(Path(progress_source_value) if progress_source_value else None),
     )

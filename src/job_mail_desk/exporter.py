@@ -29,7 +29,13 @@ def import_checked_states(path: Path, store: MarkdownTaskStore) -> int:
         task = store.load(match.group("id"))
         if not task:
             continue
-        desired = "done" if match.group("state").lower() == "x" else task.status
+        if task.status in {"cancelled", "irrelevant"}:
+            continue
+        desired = (
+            "done"
+            if match.group("state").lower() == "x"
+            else ("planned" if critical_time(task) else "needs_review")
+        )
         if desired != task.status:
             store.update_status(task.id, desired)
             updates += 1
@@ -142,7 +148,7 @@ def export_dashboard(
         )
     buckets = {key: [] for key in ("urgent", "week", "later", "review", "cancelled", "expired", "done")}
     for task in sorted(
-        tasks,
+        [item for item in tasks if item.status != "irrelevant"],
         key=lambda item: (
             critical_time(item) is None,
             critical_time(item) or item.received_at,

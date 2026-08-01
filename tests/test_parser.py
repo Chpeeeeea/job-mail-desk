@@ -41,6 +41,62 @@ def test_cross_date_window_uses_end_as_critical_time(tmp_path) -> None:
     assert critical_time(task) == datetime(2026, 7, 31, 10, 20, tzinfo=SHANGHAI)
 
 
+def test_resume_completion_24_hour_deadline() -> None:
+    event = parse_record(
+        mail(
+            "邀请您完善简历信息-北京掌上先机网络科技有限公司（慧策旺店通）",
+            (
+                "感谢您投递北京掌上先机网络科技有限公司（慧策旺店通）储备销售主管，"
+                "现邀请您完善您的简历信息。请在 2026-08-07 24:00 前，"
+                "点击马上完善简历信息。招聘流程包括测试、笔试、面试和发放录用通知。"
+            ),
+        )
+    )
+    assert event is not None
+    assert event.stage == "简历完善"
+    assert event.event_type == "deadline"
+    assert event.deadline_at == datetime(2026, 8, 8, 0, 0, tzinfo=SHANGHAI)
+    assert event.start_at is None
+    assert event.role == "储备销售主管"
+
+
+def test_chinese_hour_minute_deadline() -> None:
+    event = parse_record(
+        mail(
+            "【京东校招】2027 TET 综合面意向面试时间选择",
+            "请务必在2026年08月01日 23点59分（北京时间）前反馈面试时间。",
+        )
+    )
+    assert event is not None
+    assert event.deadline_at == datetime(2026, 8, 1, 23, 59, tzinfo=SHANGHAI)
+    assert event.start_at is None
+
+
+def test_iflytek_validity_window_beats_conditional_rejection(tmp_path) -> None:
+    record = mail(
+        "【讯飞招聘】测评通知：科大讯飞邀请您参与校园招聘在线测评",
+        (
+            "现邀请您参加 AI产品经理 岗位的线上测评。"
+            "若测评结果未通过或未及时作答，校招流程将结束。"
+            "测评将于 2026年08月08日 12:35 失效。"
+            "本次邀请于 2026年08月01日 12:35 生效，"
+            "于 2026年08月08日 12:35 失效。"
+        ),
+    )
+    event = parse_record(record)
+    assert event is not None
+    assert event.company == "科大讯飞"
+    assert event.role == "AI产品经理"
+    assert event.stage == "人才测评"
+    assert event.event_type == "assessment"
+    assert event.start_at == datetime(2026, 8, 1, 12, 35, tzinfo=SHANGHAI)
+    assert event.end_at == datetime(2026, 8, 8, 12, 35, tzinfo=SHANGHAI)
+    assert event.deadline_at is None
+    task = task_from_event(event, MarkdownTaskStore(tmp_path))
+    assert critical_time(task) == datetime(2026, 8, 8, 12, 35, tzinfo=SHANGHAI)
+    assert task.status == "planned"
+
+
 def test_footer_words_do_not_cancel_event() -> None:
     event = parse_record(
         mail(
@@ -107,6 +163,24 @@ def test_reschedule_updates_same_task(tmp_path) -> None:
     assert updated.id == original.id
     assert updated.start_at == datetime(2026, 8, 3, 14, 0, tzinfo=SHANGHAI)
     assert updated.change_type == "update"
+
+
+def test_ignored_task_is_not_reactivated_by_later_scan(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path)
+    first = parse_record(
+        mail(
+            "【样例公司】招聘通知",
+            "欢迎关注2027校园招聘。",
+            "<ignored@example.invalid>",
+        )
+    )
+    assert first is not None
+    ignored = task_from_event(first, store)
+    ignored.status = "irrelevant"
+    store.save(ignored)
+    rescanned = task_from_event(first, store)
+    assert rescanned.id == ignored.id
+    assert rescanned.status == "irrelevant"
 
 
 def test_ghost_application_is_reused_across_stages(tmp_path) -> None:

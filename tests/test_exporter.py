@@ -54,3 +54,18 @@ def test_manual_region_survives_and_checkbox_syncs_back(tmp_path) -> None:
     export_dashboard(store.all(), output, settings)
     assert "我的手写待办" in output.read_text(encoding="utf-8")
 
+    content = output.read_text(encoding="utf-8").replace(
+        f"- [x] **时间待确认**｜{item.company}",
+        f"- [ ] **时间待确认**｜{item.company}",
+    )
+    output.write_text(content, encoding="utf-8")
+    assert import_checked_states(output, store) == 1
+    assert store.load(item.id).status == "needs_review"  # type: ignore[union-attr]
+
+
+def test_irrelevant_tasks_are_not_exported(tmp_path) -> None:
+    item = sample_task()
+    item.status = "irrelevant"
+    output = tmp_path / "todo.md"
+    export_dashboard([item], output, Settings(), now=item.received_at)
+    assert item.company not in output.read_text(encoding="utf-8")
