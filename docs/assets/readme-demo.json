@@ -1,0 +1,103 @@
+{
+  "counts": { "today": 2, "progress": 3, "review": 1, "list": 3 },
+  "health": { "last_scan_at": "2026-08-01T12:18:00+08:00", "last_error": null },
+  "tasks": [
+    {
+      "id": "demo-assessment",
+      "company": "星河科技",
+      "role": "产品运营 · 2027 校招",
+      "stage": "在线测评",
+      "round": "",
+      "status": "planned",
+      "priority": "urgent",
+      "view": "today",
+      "actionable": true,
+      "time": "2026-08-02T20:00:00+08:00",
+      "time_label": "明日 20:00 截止",
+      "remaining": "18 小时后截止",
+      "action": "完成测评并预留 90 分钟，开始前检查摄像头与网络。",
+      "research_status": "closed",
+      "research_result_path": null,
+      "has_source": true,
+      "snoozed_until": null
+    },
+    {
+      "id": "demo-group",
+      "company": "云杉网络",
+      "role": "产品经理 · 综合方向",
+      "stage": "群面",
+      "round": "第一轮",
+      "status": "planned",
+      "priority": "high",
+      "view": "today",
+      "actionable": true,
+      "time": "2026-08-03T14:00:00+08:00",
+      "time_label": "8月3日 14:00",
+      "remaining": "2 天后开始",
+      "action": "准备一分钟自我介绍、无领导讨论框架和两段项目案例。",
+      "research_status": "completed",
+      "research_result_path": "demo.md",
+      "has_source": true,
+      "snoozed_until": null
+    },
+    {
+      "id": "demo-review",
+      "company": "瀚海数据",
+      "role": "商业分析",
+      "stage": "一面",
+      "round": "第一轮",
+      "status": "needs_review",
+      "priority": "normal",
+      "view": "review",
+      "actionable": true,
+      "time": null,
+      "time_label": "时间待确认",
+      "remaining": "补充时间后进入日历",
+      "action": "回复 HR 确认面试时间，并补充到任务详情。",
+      "research_status": "not_queued",
+      "research_result_path": null,
+      "has_source": false,
+      "snoozed_until": null
+    }
+  ],
+  "progress": [
+    {
+      "company": "星河科技",
+      "role": "产品运营",
+      "project": "2027 校招",
+      "current_stage": "在线测评",
+      "current_round": "",
+      "status_label": "待完成",
+      "active": true,
+      "history": [
+        { "task_id": "demo-assessment", "time": "2026-08-02T20:00:00+08:00", "stage": "在线测评", "round": "", "status": "planned", "status_label": "待完成" },
+        { "task_id": "", "time": "2026-07-28T10:20:00+08:00", "stage": "简历筛选", "round": "", "status": "done", "status_label": "已通过" }
+      ]
+    },
+    {
+      "company": "云杉网络",
+      "role": "产品经理",
+      "project": "综合方向",
+      "current_stage": "群面",
+      "current_round": "第一轮",
+      "status_label": "已安排",
+      "active": true,
+      "history": [
+        { "task_id": "demo-group", "time": "2026-08-03T14:00:00+08:00", "stage": "群面", "round": "第一轮", "status": "planned", "status_label": "已安排" },
+        { "task_id": "", "time": "2026-07-29T09:30:00+08:00", "stage": "简历筛选", "round": "", "status": "done", "status_label": "已通过" }
+      ]
+    },
+    {
+      "company": "瀚海数据",
+      "role": "商业分析",
+      "project": "校园招聘",
+      "current_stage": "一面",
+      "current_round": "第一轮",
+      "status_label": "待确认",
+      "active": true,
+      "history": [
+        { "task_id": "demo-review", "time": null, "stage": "一面", "round": "第一轮", "status": "needs_review", "status_label": "待确认" }
+      ]
+    }
+  ]
+}

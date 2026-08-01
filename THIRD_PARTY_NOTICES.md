@@ -10,6 +10,8 @@ Design research referenced these projects:
 - Obsidian Tasks (MIT): compatible task-line conventions.
 - Rainmeter Markdown Tasks (MIT): desktop Markdown task interaction.
 
-PaperTodo was consulted only for high-level interaction ideas. Its source is
-licensed under PolyForm Noncommercial plus an additional individual
-professional-use permission. No PaperTodo code, artwork, or assets are copied.
+[PaperTodo](https://github.com/snownico0722/PaperTodo) was consulted only for
+high-level desktop interaction ideas and README information-architecture
+patterns. Its source is licensed under PolyForm Noncommercial 1.0.0 plus the
+PaperTodo Individual Professional Use Additional Permission 1.0. No PaperTodo
+code, prose, screenshots, artwork, icons, animation, or other assets are copied.
