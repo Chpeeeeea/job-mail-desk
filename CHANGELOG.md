@@ -4,6 +4,10 @@ JobMailDesk 使用语义化版本号。每个可验证阶段必须先更新本�
 
 ## [Unreleased]
 
+### Changed
+
+- 增加 Release Freeze 本地验收闸门：同一轮反馈只使用本地 RC、PR 和 Actions 构建产物迭代，全部本地验收结束并标记 `release-ready` 后才一次性创建新 Release。
+
 ## [0.4.2] - 2026-08-01
 
 ### Fixed
