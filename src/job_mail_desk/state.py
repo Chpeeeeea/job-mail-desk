@@ -62,6 +62,17 @@ class StateStore:
             )
             connection.commit()
 
+    def has_successful_scan(self) -> bool:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM scan_runs
+                WHERE finished_at IS NOT NULL AND error IS NULL
+                LIMIT 1
+                """
+            ).fetchone()
+        return row is not None
+
     def prepare_parser_version(self, version: str) -> bool:
         """Replay the bounded lookback once when parsing rules change."""
         with closing(self._connect()) as connection:

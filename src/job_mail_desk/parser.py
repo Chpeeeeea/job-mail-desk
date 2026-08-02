@@ -6,11 +6,12 @@ from hashlib import sha256
 from zoneinfo import ZoneInfo
 
 from .models import MailRecord, ParsedEvent
+from .normalization import canonical_company
 from .privacy import redact_text
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-PARSER_VERSION = "2026.08.01.5"
+PARSER_VERSION = "2026.08.01.10"
 URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 RECRUITING_KEYWORDS = (
     "笔试",
@@ -64,6 +65,11 @@ DATETIME = re.compile(
 CN_DATETIME = re.compile(
     r"(?:(?P<y>20\d{2})[年./-])?(?P<m>\d{1,2})[月./-](?P<d>\d{1,2})[日号]?"
     r"[^\d]{0,12}(?P<h>[01]?\d|2[0-3]|24)\s*点(?:\s*(?P<min>[0-5]?\d)\s*分)?"
+)
+RELATIVE_DEADLINE = re.compile(
+    r"(?:收到(?:本)?邮件(?:后)?(?:的)?|收到(?:本)?通知(?:后)?|请在|须在|务必在)"
+    r"[^。；;]{0,16}?"
+    r"(?P<amount>\d{1,3})\s*(?P<unit>小时|天)(?:内|之内)"
 )
 ROLE_PATTERNS = (
     re.compile(r"(?:邀请您参加|邀请你参加)\s*([^，。\n]{2,60}?)\s*岗位"),
@@ -153,12 +159,38 @@ def _times(
             deadline = candidate
         elif re.search(r"^\s*生效", after) or start is None:
             start = candidate
-    if start and deadline and re.search(r"生效", text) and re.search(r"失效", text):
+    if start and deadline and (
+        (re.search(r"生效", text) and re.search(r"失效", text))
+        or (re.search(r"邀请于", text) and re.search(r"失效", text))
+    ):
         end, deadline = deadline, None
+    if deadline is None:
+        relative = RELATIVE_DEADLINE.search(text)
+        if relative:
+            amount = int(relative.group("amount"))
+            if 0 < amount <= 720:
+                delta = (
+                    timedelta(hours=amount)
+                    if relative.group("unit") == "小时"
+                    else timedelta(days=amount)
+                )
+                deadline = received + delta
     return start, end, deadline
 
 
 def _stage(subject: str, body: str) -> str:
+    if re.search(r"待(?:你|您)?\s*(?:完成|提交)网申|完成网申后", f"{subject} {body}"):
+        return "招聘通知"
+    if re.search(r"应聘结果反馈", subject) and re.search(
+        r"(?:未来|后续).{0,30}(?:适合|合适).{0,12}职位|有适合您?的职位开放",
+        body,
+    ):
+        return "未通过"
+    if re.search(
+        r"(?:简历)?投递成功|简历(?:已经|已)收到|内推成功确认|网申成功",
+        f"{subject} {body}",
+    ):
+        return "网申"
     for text in (subject, body):
         lowered = text.lower()
         for stage, keywords in STAGES:
@@ -199,17 +231,22 @@ def _change(subject: str, body: str) -> str:
 def _company(subject: str, sender: str) -> str | None:
     bracket = re.search(r"【([^】]{2,30})】", subject)
     if bracket:
-        company = normalize(bracket.group(1))
-        return {"讯飞招聘": "科大讯飞"}.get(company, company)
+        company = canonical_company(bracket.group(1))
+        if company:
+            return company
     source = re.match(r"来自([^的]{2,30})的", subject)
     if source:
-        return normalize(source.group(1))
+        company = canonical_company(source.group(1))
+        if company:
+            return company
     acknowledgement = re.search(
         r"感谢(?:您|你)投递([^，。]{2,50}?)(?:校园招聘|校招|招聘|职位|岗位)",
         subject,
     )
     if acknowledgement:
-        return normalize(acknowledgement.group(1))
+        company = canonical_company(acknowledgement.group(1))
+        if company:
+            return company
     prefix = re.search(
         r"([\u4e00-\u9fffA-Za-z·.]{2,30}?)(?:20\d{2})?"
         r"(?:校园招聘|校招|招聘|邀请|笔试|测评|面试)",
@@ -217,9 +254,13 @@ def _company(subject: str, sender: str) -> str | None:
     )
     if prefix:
         company = normalize(prefix.group(1))
-        return re.split(r"邀请|邀您|诚邀|通知", company, maxsplit=1)[0]
+        company = canonical_company(
+            re.split(r"邀请|邀您|诚邀|通知", company, maxsplit=1)[0]
+        )
+        if company:
+            return company
     sender_name = sender.partition("<")[0].strip()
-    return sender_name[:30] if 2 <= len(sender_name) <= 30 else None
+    return canonical_company(sender_name[:30]) if 2 <= len(sender_name) <= 30 else None
 
 
 def _role(body: str) -> str | None:
@@ -235,13 +276,34 @@ def _role(body: str) -> str | None:
             )[0]
             value = re.sub(r"^【[^】]{2,30}】\s*", "", value)
             value = redact_text(value).strip(" -—|：:")
+            if re.search(
+                r"https?://|www\.|\.com(?:/|\b)|官网|个人中心|应聘记录|进行修改|点击",
+                value,
+                re.IGNORECASE,
+            ):
+                continue
             return value[:80] or None
     return None
 
 
 def _project(text: str) -> str | None:
-    match = re.search(r"(20\d{2}届?(?:校园招聘|校招|秋招|春招))", text)
-    return match.group(1) if match else None
+    cycle_match = re.search(
+        r"(?P<year>20\d{2})届?[^，。；;\n]{0,12}?(?:校园招聘|校招|秋招|春招)",
+        text,
+    )
+    cycle = f"{cycle_match.group('year')}校园招聘" if cycle_match else None
+    if not cycle:
+        short_cycle = re.search(r"(?<!\d)(?P<year>\d{2})届(?:校园招聘|校招|秋招|春招)", text)
+        if short_cycle:
+            cycle = f"20{short_cycle.group('year')}校园招聘"
+    business_unit = None
+    if re.search(r"(?:网易游戏)?雷火(?:事业群|校招)?", text):
+        business_unit = "雷火事业群"
+    elif re.search(r"(?:网易游戏)?互娱(?:事业群|校招)?", text):
+        business_unit = "互娱事业群"
+    if business_unit and cycle:
+        return f"{business_unit} · {cycle}"
+    return business_unit or cycle
 
 
 def _round(text: str) -> str | None:
@@ -294,6 +356,9 @@ def parse_record(record: MailRecord) -> ParsedEvent | None:
     start, end, deadline = _times(combined, record.received_at.astimezone(SHANGHAI))
     company = _company(subject, record.sender)
     role = _role(record.body)
+    project = _project(combined)
+    if company == "网易招聘" and project and re.search(r"雷火事业群|互娱事业群", project):
+        company = "网易游戏"
     requirements = _evidence(record.body)
     source_id = record.message_id or (
         "<generated-"
@@ -319,7 +384,7 @@ def parse_record(record: MailRecord) -> ParsedEvent | None:
     return ParsedEvent(
         company=company,
         role=role,
-        recruiting_project=_project(combined),
+        recruiting_project=project,
         event_type=_event_type(stage),
         stage=stage,
         round=_round(combined),

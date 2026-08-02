@@ -14,10 +14,17 @@ from .state import StateStore
 from .task_service import critical_time
 
 
+DASHBOARD_CACHE_SCHEMA = 2
+
+
 def _view(task: JobTask, now: datetime) -> str:
     if task.status in {"done", "expired", "cancelled"}:
         return "progress"
-    if task.event_type == "application" and not critical_time(task):
+    if (
+        task.status == "confirmed"
+        and task.event_type == "application"
+        and not critical_time(task)
+    ):
         return "progress"
     if task.snoozed_until and task.snoozed_until > now:
         return "snoozed"
@@ -55,11 +62,17 @@ def _task_payload(
         "closed": "closed",
     }.get(queue_status, task.research_status)
     result_path = str((research_state or {}).get("result_path") or "")
+    todo_visible = task.status == "done" or (
+        task.status in {"confirmed", "planned"}
+        and (bool(target) or task.event_type == "manual")
+    )
     return {
         "id": task.id,
         "application_id": task.application_id,
         "company": task.company,
         "role": task.role or "岗位待确认",
+        "event_type": task.event_type,
+        "received_at": task.received_at.isoformat(),
         "project": task.recruiting_project or "",
         "stage": task.stage,
         "round": task.round or "",
@@ -81,7 +94,7 @@ def _task_payload(
         "research_status": research_status,
         "research_result_path": result_path,
         "has_source": bool(task.source_url),
-        "actionable": task.event_type != "application" or bool(target),
+        "actionable": todo_visible,
         "view": _view(task, now),
     }
 
@@ -95,7 +108,7 @@ def dashboard_payload(
     tasks = [
         task
         for task in all_tasks
-        if task.status not in {"cancelled", "irrelevant"}
+        if task.status not in {"cancelled", "expired", "irrelevant"}
     ]
     states = request_states(research_queue)
     payload = [_task_payload(task, now, states.get(task.id)) for task in tasks]
@@ -148,6 +161,7 @@ def _source_signature(
     if progress_source:
         paths.append(progress_source)
     signature: list[list[object]] = [
+        ["schema", DASHBOARD_CACHE_SCHEMA],
         ["minute", datetime.now(SHANGHAI).strftime("%Y-%m-%dT%H:%M")]
     ]
     for path in paths:

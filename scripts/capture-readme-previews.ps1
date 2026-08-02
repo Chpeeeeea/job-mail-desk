@@ -68,6 +68,7 @@ $pageUri = ([Uri](Join-Path $tempRoot "index.html")).AbsoluteUri
 $captures = @(
   @{ View = "today"; File = "jobmaildesk-today.png"; Height = 620 },
   @{ View = "progress"; File = "jobmaildesk-progress.png"; Height = 900 },
+  @{ View = "review"; File = "jobmaildesk-review.png"; Height = 620 },
   @{ View = "week"; File = "jobmaildesk-week.png"; Height = 760 },
   @{ View = "month"; File = "jobmaildesk-calendar.png"; Height = 760 }
 )

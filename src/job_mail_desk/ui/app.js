@@ -9,6 +9,7 @@ const state = {
   expandedCompanies: new Set(),
   setupInitialized: false,
   settingsFirstRun: false,
+  reviewFilter: "all",
 };
 
 const cards = document.querySelector("#cards");
@@ -366,9 +367,13 @@ function renderCards() {
     renderMonth();
     return;
   }
-  const tasks = state.view === "list"
+  let tasks = state.view === "list"
     ? state.payload.tasks.filter((task) => task.actionable)
     : state.payload.tasks.filter((task) => task.view === state.view);
+  if (state.view === "review") {
+    renderReviewFilterBar(tasks);
+    tasks = filterReviewTasks(tasks, state.reviewFilter);
+  }
   if (!tasks.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
@@ -434,6 +439,49 @@ function renderCards() {
     node.addEventListener("click", () => showTaskDialog(task));
     cards.append(node);
   }
+}
+
+function filterReviewTasks(tasks, filter) {
+  if (filter === "recent") {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return tasks.filter((task) => new Date(task.received_at).getTime() >= cutoff);
+  }
+  if (filter === "application") {
+    return tasks.filter((task) =>
+      task.event_type === "application" || /简历|网申/.test(task.stage),
+    );
+  }
+  if (filter === "assessment") {
+    return tasks.filter((task) => /测评|笔试|作答/.test(task.stage));
+  }
+  if (filter === "interview") {
+    return tasks.filter((task) => /面试/.test(task.stage));
+  }
+  return tasks;
+}
+
+function renderReviewFilterBar(tasks) {
+  const filters = [
+    ["all", "全部"],
+    ["recent", "近 7 天"],
+    ["application", "简历筛选"],
+    ["assessment", "测评/笔试"],
+    ["interview", "面试"],
+  ];
+  const bar = document.createElement("nav");
+  bar.className = "filter-bar";
+  filters.forEach(([key, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = key === state.reviewFilter ? "active" : "";
+    button.textContent = `${label} ${filterReviewTasks(tasks, key).length}`;
+    button.addEventListener("click", () => {
+      state.reviewFilter = key;
+      renderCards();
+    });
+    bar.append(button);
+  });
+  cards.append(bar);
 }
 
 function renderProgress() {

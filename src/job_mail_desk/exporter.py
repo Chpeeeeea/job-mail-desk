@@ -31,11 +31,14 @@ def import_checked_states(path: Path, store: MarkdownTaskStore) -> int:
             continue
         if task.status in {"cancelled", "irrelevant"}:
             continue
-        desired = (
-            "done"
-            if match.group("state").lower() == "x"
-            else ("planned" if critical_time(task) else "needs_review")
-        )
+        if match.group("state").lower() == "x":
+            desired = "done"
+        elif task.status == "done":
+            desired = "planned" if critical_time(task) else "needs_review"
+        else:
+            # An unchecked Markdown task means "not done"; it does not carry
+            # enough information to downgrade confirmed application progress.
+            continue
         if desired != task.status:
             store.update_status(task.id, desired)
             updates += 1
@@ -146,9 +149,13 @@ def export_dashboard(
             "\n## 手动补充\n\n"
             "<!-- 可在这里添加自己的待办；自动更新不会覆盖本区。 -->\n"
         )
-    buckets = {key: [] for key in ("urgent", "week", "later", "review", "cancelled", "expired", "done")}
+    buckets = {key: [] for key in ("urgent", "week", "later", "review", "done")}
     for task in sorted(
-        [item for item in tasks if item.status != "irrelevant"],
+        [
+            item
+            for item in tasks
+            if item.status not in {"cancelled", "expired", "irrelevant"}
+        ],
         key=lambda item: (
             critical_time(item) is None,
             critical_time(item) or item.received_at,
@@ -161,8 +168,6 @@ def export_dashboard(
         ("week", "未来 7 天"),
         ("later", "更晚安排"),
         ("review", "待确认时间"),
-        ("cancelled", "取消或作废通知"),
-        ("expired", "已过期但未完成"),
         ("done", "已完成"),
     ):
         lines.extend(_section(title, buckets[key], settings))
