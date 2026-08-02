@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .config import DASHBOARD_FILE, STATE_DB, TASKS_DIR, Settings, ensure_directories
 from .credentials import load_credential
@@ -10,9 +10,9 @@ from .mail_reader import ImapReader
 from .markdown_store import MarkdownTaskStore
 from .parser import PARSER_VERSION, SHANGHAI, parse_record
 from .progress import export_progress
-from .research import build_request, queue_request, synchronize_research_state
+from .research import synchronize_research_state
 from .state import StateStore
-from .task_service import message_hash, task_from_event
+from .task_service import critical_time, message_hash, task_from_event
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,32 @@ class ScanSummary:
         return asdict(self)
 
 
+INITIAL_LOOKBACK_DAYS = 30
+STALE_ACTION_DAYS = 7
+STALE_EVENT_TYPES = {"assessment", "interview", "deadline"}
+
+
+def _effective_lookback_days(
+    settings: Settings,
+    state: StateStore,
+    requested_days: int | None,
+) -> int:
+    if requested_days is not None:
+        return requested_days
+    if not state.has_successful_scan():
+        return max(INITIAL_LOOKBACK_DAYS, settings.lookback_days)
+    return settings.lookback_days
+
+
+def _is_stale_attention(task, now: datetime) -> bool:
+    return (
+        task.status == "needs_review"
+        and task.event_type in STALE_EVENT_TYPES
+        and critical_time(task) is None
+        and task.received_at < now - timedelta(days=STALE_ACTION_DAYS)
+    )
+
+
 def scan_once(
     settings: Settings,
     *,
@@ -47,7 +73,8 @@ def scan_once(
     try:
         if settings.obsidian_enabled:
             import_checked_states(settings.obsidian_output, store)
-        records = ImapReader(settings, load_credential()).fetch_since(days)
+        effective_days = _effective_lookback_days(settings, state, days)
+        records = ImapReader(settings, load_credential()).fetch_since(effective_days)
         for record in records:
             fetched += 1
             source_id = record.message_id or f"imap-uid:{record.uid}"
@@ -87,14 +114,8 @@ def scan_once(
                     updated += 1
                     if task.priority == "urgent":
                         urgent += 1
-                    if settings.research_enabled:
-                        request = build_request(task)
-                        if request and queue_request(
-                            request,
-                            settings.research_queue,
-                            store,
-                        ):
-                            queued += 1
+                    # Core never creates public research requests. Research is
+                    # an external opt-in extension and cannot block mail sync.
             if not shadow:
                 state.mark_processed(source_hash, task_identifier)
         if not shadow:
@@ -114,6 +135,9 @@ def scan_once(
                     and task.status
                     not in {"done", "cancelled", "irrelevant", "expired"}
                 ):
+                    task.status = "expired"
+                    store.save(task)
+                elif _is_stale_attention(task, now):
                     task.status = "expired"
                     store.save(task)
             tasks = store.all()

@@ -158,7 +158,9 @@ def load_settings(path: Path | None = None) -> Settings:
             if progress.get("source_path")
             else None
         ),
-        research_enabled=bool(research.get("enabled", False)),
+        # Legacy versions could persist research.enabled=true. Core no longer
+        # creates research queues, so the old switch is intentionally ignored.
+        research_enabled=False,
         research_queue=Path(str(research.get("queue_path") or RESEARCH_QUEUE)),
         ui_width=int(ui.get("width", 480)),
         ui_height=int(ui.get("height", 740)),
@@ -247,6 +249,7 @@ def settings_from_payload(
         progress_enabled=bool(payload.get("progress_enabled", False)),
         progress_output=progress_output,
         progress_source=(Path(progress_source_value) if progress_source_value else None),
+        research_enabled=False,
         updates_enabled=bool(payload.get("updates_enabled", current.updates_enabled)),
         update_channel=update_channel,
     )

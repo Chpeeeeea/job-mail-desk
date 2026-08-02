@@ -36,6 +36,44 @@ def _compatible(value: str | None, existing: str | None) -> bool:
     return not value or not existing or value == existing
 
 
+def _project_scope(value: str | None) -> str | None:
+    if not value:
+        return None
+    if "雷火事业群" in value:
+        return "netease-leihuo"
+    if "互娱事业群" in value:
+        return "netease-interactive"
+    return None
+
+
+def _compatible_project(value: str | None, existing: str | None) -> bool:
+    if not value or not existing:
+        return True
+    value_scope = _project_scope(value)
+    existing_scope = _project_scope(existing)
+    if value_scope or existing_scope:
+        return value_scope == existing_scope
+    return value == existing
+
+
+def _merge_project(existing: str | None, incoming: str | None) -> str | None:
+    if not incoming:
+        return existing
+    if not existing:
+        return incoming
+    old_scope = _project_scope(existing)
+    new_scope = _project_scope(incoming)
+    if old_scope and new_scope:
+        if old_scope != new_scope:
+            return existing
+        return max((existing, incoming), key=len)
+    if old_scope and not new_scope:
+        return existing
+    if new_scope and not old_scope:
+        return incoming
+    return incoming
+
+
 def _resolve_application_id(
     event: ParsedEvent,
     store: MarkdownTaskStore,
@@ -46,10 +84,18 @@ def _resolve_application_id(
         for task in store.all()
         if task.company == (event.company or "公司待确认")
         and _compatible(event.role, task.role)
-        and _compatible(event.recruiting_project, task.recruiting_project)
+        and _compatible_project(event.recruiting_project, task.recruiting_project)
     ]
     if not candidates:
         return application_id(event)
+    if not event.recruiting_project:
+        scopes = {
+            scope
+            for task in candidates
+            if (scope := _project_scope(task.recruiting_project))
+        }
+        if len(scopes) > 1:
+            return application_id(event)
     candidates.sort(key=lambda task: task.received_at, reverse=True)
     return candidates[0].application_id
 
@@ -86,8 +132,9 @@ def _merge(existing: JobTask, event: ParsedEvent, now: datetime) -> JobTask:
     previous_event_type = existing.event_type
     existing.company = event.company or existing.company
     existing.role = event.role or existing.role
-    existing.recruiting_project = (
-        event.recruiting_project or existing.recruiting_project
+    existing.recruiting_project = _merge_project(
+        existing.recruiting_project,
+        event.recruiting_project,
     )
     existing.received_at = max(existing.received_at, event.source_received_at)
     existing.event_type = event.event_type
@@ -108,6 +155,8 @@ def _merge(existing: JobTask, event: ParsedEvent, now: datetime) -> JobTask:
     has_schedule = bool(event.start_at or event.end_at or event.deadline_at)
     if event.change_type == "cancel":
         existing.status = "cancelled"
+    elif event.event_type == "rejection":
+        existing.status = "done"
     elif previous_event_type == "rejection" and event.event_type != "rejection":
         existing.status = "planned" if has_schedule else "needs_review"
     elif existing.status == "irrelevant":

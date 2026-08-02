@@ -36,3 +36,10 @@ def test_settings_round_trip_paths_and_intervals(tmp_path) -> None:
     assert loaded.research_enabled is False
     assert loaded.updates_enabled is False
     assert loaded.update_channel == "stable"
+
+
+def test_legacy_research_switch_is_ignored_by_core(tmp_path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text("[research]\nenabled = true\n", encoding="utf-8")
+
+    assert load_settings(config).research_enabled is False

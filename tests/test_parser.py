@@ -2,7 +2,7 @@ from datetime import datetime
 
 from job_mail_desk.models import MailRecord
 from job_mail_desk.parser import SHANGHAI, parse_record
-from job_mail_desk.task_service import critical_time, task_from_event
+from job_mail_desk.task_service import application_id, critical_time, task_from_event
 from job_mail_desk.markdown_store import MarkdownTaskStore
 
 
@@ -60,6 +60,21 @@ def test_resume_completion_24_hour_deadline() -> None:
     assert event.role == "储备销售主管"
 
 
+def test_relative_hours_deadline_uses_received_time() -> None:
+    record = MailRecord(
+        uid="relative-72",
+        subject="校园招聘测评邀请",
+        message_id="<relative-72@example.com>",
+        sender="样例公司招聘 <hr@example.com>",
+        received_at=datetime(2026, 7, 24, 19, 4, tzinfo=SHANGHAI),
+        body="请您务必于收到本邮件后的72小时内完成在线测评。",
+    )
+
+    event = parse_record(record)
+    assert event is not None
+    assert event.deadline_at == datetime(2026, 7, 27, 19, 4, tzinfo=SHANGHAI)
+
+
 def test_chinese_hour_minute_deadline() -> None:
     event = parse_record(
         mail(
@@ -95,6 +110,129 @@ def test_iflytek_validity_window_beats_conditional_rejection(tmp_path) -> None:
     task = task_from_event(event, MarkdownTaskStore(tmp_path))
     assert critical_time(task) == datetime(2026, 8, 8, 12, 35, tzinfo=SHANGHAI)
     assert task.status == "planned"
+
+
+def test_invitation_and_expiry_are_parsed_as_validity_window(tmp_path) -> None:
+    event = parse_record(
+        mail(
+            "【样例公司】校园招聘在线测评通知",
+            (
+                "本次测试邀请于2026年07月20日 19:53，"
+                "于2026年07月25日 19:53失效。请尽快完成测评。"
+            ),
+        )
+    )
+    assert event is not None
+    assert event.start_at == datetime(2026, 7, 20, 19, 53, tzinfo=SHANGHAI)
+    assert event.end_at == datetime(2026, 7, 25, 19, 53, tzinfo=SHANGHAI)
+    assert event.deadline_at is None
+    task = task_from_event(event, MarkdownTaskStore(tmp_path))
+    assert critical_time(task) == datetime(2026, 7, 25, 19, 53, tzinfo=SHANGHAI)
+
+
+def test_netease_business_units_share_parent_but_not_application_chain(tmp_path) -> None:
+    leihuo = parse_record(
+        mail(
+            "【网易游戏雷火校招】2027校园招聘在线测评通知",
+            "感谢您投递产品经理岗位，请尽快完成在线测评。",
+            "<netease-leihuo@example.invalid>",
+        )
+    )
+    interactive = parse_record(
+        mail(
+            "【网易游戏互娱校招】2027校园招聘在线测评通知",
+            "感谢您投递产品经理岗位，请尽快完成在线测评。",
+            "<netease-interactive@example.invalid>",
+        )
+    )
+    assert leihuo is not None and interactive is not None
+    assert leihuo.company == interactive.company == "网易游戏"
+    assert leihuo.recruiting_project == "雷火事业群 · 2027校园招聘"
+    assert interactive.recruiting_project == "互娱事业群 · 2027校园招聘"
+    assert application_id(leihuo) != application_id(interactive)
+    store = MarkdownTaskStore(tmp_path)
+    leihuo_task = task_from_event(leihuo, store)
+    store.save(leihuo_task)
+    interactive_task = task_from_event(interactive, store)
+    assert leihuo_task.application_id != interactive_task.application_id
+
+
+def test_netease_pending_application_is_not_marked_submitted(tmp_path) -> None:
+    event = parse_record(
+        mail(
+            "【网易游戏雷火校招】内推提醒",
+            "恭喜你解锁雷火内推特权，待你完成网申后内推才会正式生效！",
+            "<netease-pending@example.invalid>",
+        )
+    )
+    assert event is not None
+    assert event.company == "网易游戏"
+    assert event.recruiting_project == "雷火事业群"
+    assert event.stage == "招聘通知"
+    assert event.event_type == "notice"
+    task = task_from_event(event, MarkdownTaskStore(tmp_path))
+    assert task.status == "needs_review"
+
+
+def test_generic_online_label_falls_back_to_sender_company() -> None:
+    record = MailRecord(
+        uid="duoyi-online",
+        subject="在线测评通知",
+        message_id="<duoyi-online@example.invalid>",
+        sender="多益网络招聘 <hr@example.invalid>",
+        received_at=datetime(2026, 7, 23, 16, 21, tzinfo=SHANGHAI),
+        body="感谢应聘 产品策划助理 岗位，已进入在线测评环节。",
+    )
+    event = parse_record(record)
+    assert event is not None
+    assert event.company == "多益网络"
+
+
+def test_generic_recruiting_cycle_label_falls_back_to_sender_company() -> None:
+    record = MailRecord(
+        uid="xpeng-27",
+        subject="小鹏集团-【27届校招】项目管理培训生-AI测评邀请",
+        message_id="<xpeng-27@example.invalid>",
+        sender="小鹏汽车 <hr@example.invalid>",
+        received_at=datetime(2026, 7, 13, 9, 9, tzinfo=SHANGHAI),
+        body="我们诚挚地邀请您参加【27届校招】项目管理培训生的AI测评面试。",
+    )
+    event = parse_record(record)
+    assert event is not None
+    assert event.company == "小鹏汽车"
+    assert event.recruiting_project == "2027校园招聘"
+
+
+def test_application_receipt_beats_process_list_offer_noise() -> None:
+    record = MailRecord(
+        uid="netease-receipt",
+        subject="【网易招聘】简历投递成功，请确认职位信息",
+        message_id="<netease-receipt@example.invalid>",
+        sender="NetEase_HR <hr@example.invalid>",
+        received_at=datetime(2026, 8, 1, 23, 23, tzinfo=SHANGHAI),
+        body=(
+            "【网易游戏雷火校招】您的简历已经收到。"
+            "投递项目：2027届雷火秋季校园招聘 职位名称：游戏AI产品经理。"
+            "流程为：简历投递 → 简历筛选 → 笔试/测试 → 面试 → 测评 → offer。"
+        ),
+    )
+    event = parse_record(record)
+    assert event is not None
+    assert event.company == "网易游戏"
+    assert event.stage == "网申"
+    assert event.event_type == "application"
+    assert event.recruiting_project == "雷火事业群 · 2027校园招聘"
+
+
+def test_role_parser_rejects_instruction_as_role() -> None:
+    event = parse_record(
+        mail(
+            "【网易游戏】雷火事业群校招内推成功确认邮件",
+            "职位：请到官网 campus.163.com/app/personal/apply，前往个人中心应聘记录进行修改。",
+        )
+    )
+    assert event is not None
+    assert event.role is None
 
 
 def test_footer_words_do_not_cancel_event() -> None:
@@ -137,6 +275,31 @@ def test_rejection_is_not_left_as_an_actionable_todo(tmp_path) -> None:
     assert event is not None
     task = task_from_event(event, MarkdownTaskStore(tmp_path))
     assert task.status == "done"
+
+
+def test_reparsed_existing_notice_becomes_done_when_it_is_a_rejection(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path)
+    original = parse_record(
+        mail(
+            "【小鹏汽车】校园招聘通知",
+            "感谢关注校园招聘，后续请留意招聘通知。",
+            "<reclassified@example.invalid>",
+        )
+    )
+    assert original is not None
+    task = task_from_event(original, store)
+    store.save(task)
+    corrected = parse_record(
+        mail(
+            "小鹏汽车校园招聘应聘结果反馈",
+            "未来有适合您的职位开放时，我们将第一时间联系您。",
+            "<reclassified@example.invalid>",
+        )
+    )
+    assert corrected is not None
+    updated = task_from_event(corrected, store)
+    assert updated.id == task.id
+    assert updated.status == "done"
 
 
 def test_reschedule_updates_same_task(tmp_path) -> None:

@@ -249,6 +249,36 @@ body.capsule .capsule-view {
   font-weight: 700;
 }
 
+.filter-bar {
+  display: flex;
+  gap: 5px;
+  margin: 0 1px 9px;
+  padding: 1px 0 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filter-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-bar button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper-raised) 78%, transparent);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.filter-bar button.active {
+  border-color: color-mix(in srgb, var(--safe) 52%, var(--line));
+  background: color-mix(in srgb, var(--safe) 13%, var(--paper-raised));
+  color: var(--safe);
+  font-weight: 700;
+}
+
 .cards {
   overflow-y: auto;
   padding: 0 14px 10px;
