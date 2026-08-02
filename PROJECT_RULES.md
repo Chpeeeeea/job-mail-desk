@@ -53,6 +53,9 @@ jobmaildesk task-update <稳定任务ID> [字段参数]
 - 完整维护流程以`docs/MAINTENANCE.md`为准；本节是不可跳过的发布闸门。
 - `main`是唯一正式主线，不直接在`main`开发；所有阶段修改必须通过短期分支和Pull Request进入主线。
 - 必须区分“推送分支”“合并主线”和“发布安装包”：阶段提交需要推送，验收完成需要合并，只有可交付的程序变化才创建新Release。
+- 本地验收未全部结束时进入 **Release Freeze**：只允许本地 RC 包、功能分支、Draft/Ready PR 和 Actions 构建产物，禁止创建版本标签或 Release。
+- 同一轮集中反馈默认合并为一个版本发布；不得因为每次小修复、文档调整或尚待个人真实数据验证的中间状态反复增加 PATCH Release。
+- 只有本地验收清单全部关闭、真实数据回归完成、版本范围冻结并明确判定“release-ready”后，才允许一次性创建版本标签；发布后新增问题进入下一轮版本，不静默替换资产。
 - Windows包使用PyInstaller，启用Per-Monitor DPI v2。
 - macOS包使用py2app，在真实macOS Runner分别生成arm64与Intel产物。
 - 只有 Pull Request 的 Windows x64、macOS Apple Silicon、macOS Intel 检查全部通过后才能合并并创建版本标签；标签必须对应 `docs/RELEASE_NOTES_vX.Y.Z.md`。

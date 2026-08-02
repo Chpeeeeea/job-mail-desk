@@ -95,9 +95,23 @@ git diff --check
 
 仅 README、截图、项目规则或开发文档变化时，通常只合并 `main`，并留在 `[Unreleased]`；下一个产品版本统一带入安装包。
 
+### Release Freeze（本地验收闸门）
+
+- 从一轮功能开发或问题集中处理开始，到本地验收清单全部关闭之前，持续处于 Release Freeze。
+- Freeze 期间允许提交、推送、PR、三平台 CI 和本地 `-rc` 测试包，但禁止创建 `vX.Y.Z` 标签或 GitHub Release。
+- 同一轮用户反馈应尽量合并验证，不能每修一处就发布一个安装包。中间版本由本地 RC 或 Actions artifact 承担。
+- 只有以下项目全部满足后，维护者才能明确标记 `release-ready`：
+  - 本轮范围冻结，不再等待已知反馈或数据样例；
+  - 自动化测试、秘密扫描、`git diff --check` 全部通过；
+  - 真实邮件只读回放、重复扫描、状态持久化和 Obsidian 同步已验证；
+  - UI 视觉、启动、缓存、退出、单实例与本地 self-contained 包已验证；
+  - Changelog、Release Notes、版本号和升级说明已完成。
+- `main` 可以在 Freeze 期间接收已经验证的阶段 PR；合并主线不等于立即发布。Release 应在本轮全部本地验证结束后一次性完成。
+- 安全、凭据泄露或数据损坏类紧急问题可以跳过常规批次等待，但仍必须完成与风险相称的本地验证并发布更高 PATCH。
+
 ## 5. 产品发布流程
 
-1. 决定新版本号并同步更新项目版本字段。
+1. 确认 Release Freeze 已解除并记录 `release-ready`，再决定新版本号并同步更新项目版本字段。
 2. 将 `[Unreleased]` 中属于本版本的内容移动到 `## [X.Y.Z] - YYYY-MM-DD`。
 3. 创建 `docs/RELEASE_NOTES_vX.Y.Z.md`，写清亮点、修复、升级方式、已知问题、签名状态和数据兼容性。
 4. 更新 README 中的版本号、下载链接和预览版提示。
