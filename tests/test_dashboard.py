@@ -80,6 +80,36 @@ def test_snoozed_task_leaves_attention_views_but_keeps_event_time() -> None:
     assert item["has_source"] is True
 
 
+def test_needs_review_without_time_stays_out_of_todo_list() -> None:
+    now = datetime(2026, 8, 1, 10, 0, tzinfo=SHANGHAI)
+    task = JobTask(
+        id="8" * 24,
+        application_id="9" * 20,
+        company="样例公司",
+        role="管培生",
+        recruiting_project=None,
+        event_type="application",
+        stage="简历筛选",
+        round=None,
+        received_at=now,
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        priority="normal",
+        status="needs_review",
+        change_type="new",
+        source_message_hash="a" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="简历筛选中",
+        action_summary="等待后续通知",
+    )
+
+    item = dashboard._task_payload(task, now)
+    assert item["view"] == "review"
+    assert item["actionable"] is False
+
+
 def test_dashboard_cache_reuses_unchanged_snapshot(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(dashboard, "TASKS_DIR", tmp_path / "tasks")
     monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
@@ -98,3 +128,41 @@ def test_dashboard_cache_reuses_unchanged_snapshot(tmp_path, monkeypatch) -> Non
         cache_path=cache,
     )
     assert second == first
+
+
+def test_expired_task_is_hidden_from_action_views_but_kept_in_progress(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    store = MarkdownTaskStore(tasks_dir)
+    task = JobTask(
+        id="5" * 24,
+        application_id="6" * 20,
+        company="样例公司",
+        role="产品经理",
+        recruiting_project=None,
+        event_type="assessment",
+        stage="在线笔试",
+        round=None,
+        received_at=datetime(2026, 7, 20, 10, 0, tzinfo=SHANGHAI),
+        start_at=datetime(2026, 7, 21, 10, 0, tzinfo=SHANGHAI),
+        end_at=None,
+        deadline_at=None,
+        priority="normal",
+        status="expired",
+        change_type="new",
+        source_message_hash="7" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="已过期笔试",
+        action_summary="参加在线笔试",
+    )
+    store.save(task)
+    monkeypatch.setattr(dashboard, "TASKS_DIR", tasks_dir)
+    monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
+
+    payload = dashboard.dashboard_payload(tmp_path / "research.jsonl")
+    assert payload["tasks"] == []
+    assert payload["counts"]["list"] == 0
+    assert payload["progress"][0]["current_stage"] == "在线笔试"

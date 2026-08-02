@@ -13,14 +13,14 @@
 [![Build](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml/badge.svg)](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml)
 [![License](https://img.shields.io/github/license/Chpeeeeea/job-mail-desk?color=25231f)](LICENSE.md)
 
-[下载 v0.4.1](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.1) · [快速开始](docs/CORE_QUICKSTART.md) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md)
+[下载 v0.4.2](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.2) · [快速开始](docs/CORE_QUICKSTART.md) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md)
 
 **无需安装 Python · 无需大模型 · 无需 API Key · 国内网络可直接运行 Core**
 
 </div>
 
 > [!IMPORTANT]
-> 当前为 `v0.4.1` 预览版。Windows 与 macOS 发布包尚未完成代码签名或 Apple 公证，请只从本仓库 Release 下载，并核对同名 `.sha256` 文件。真实邮件、授权码、本地任务和私人链接不会进入公开仓库。
+> 当前为 `v0.4.2` 预览版。Windows 与 macOS 发布包尚未完成代码签名或 Apple 公证，请只从本仓库 Release 下载，并核对同名 `.sha256` 文件。真实邮件、授权码、本地任务和私人链接不会进入公开仓库。
 
 ---
 
@@ -44,7 +44,7 @@ JobMailDesk Core 是已经包含运行环境的桌面程序。普通用户不需
 - 完整 QQ 邮箱地址；
 - IMAP 授权码，**不是 QQ 登录密码**；
 - 扫描间隔，建议保留默认 10 分钟；
-- 首次回看天数，建议先用默认 3 天。
+- 首次启动自动回看最近 30 天；完成后按设置中的短窗口扫描，默认 3 天。
 
 点击“测试只读邮箱连接”。程序只使用只读 IMAP 与 `BODY.PEEK`，不会删除、移动、回复邮件，也不会改变未读状态。授权码只存入 Windows Credential Manager 或 macOS Keychain。
 
@@ -79,6 +79,10 @@ JobMailDesk Core 是已经包含运行环境的桌面程序。普通用户不需
 | 企业进展 |
 | :---: |
 | <img src="docs/assets/jobmaildesk-progress.png" alt="JobMailDesk 企业申请进展匿名演示" width="720"> |
+
+| 待确认筛选 |
+| --- |
+| <img src="docs/assets/jobmaildesk-review.png" alt="JobMailDesk 待确认分类筛选匿名演示" width="720"> |
 
 | 周历 | 月历 |
 | :---: | :---: |
@@ -143,6 +147,8 @@ flowchart LR
 ```
 
 默认每 10 分钟检查新邮件与硬截止，每小时归类并刷新任务链。SQLite 保存去重状态和扫描游标，桌面首次显示优先读取本地快照，因此重新打开不需要从头处理全部邮件。
+
+企业名称先经过本地标准化词库：招聘通用词不会被当成公司，已核验别名按精确映射归类，事业群则保留为独立招聘项目。比如网易雷火和网易互娱同属“网易游戏”总览，但不会串入同一申请链。详见[企业、项目与阶段标准化](docs/NORMALIZATION.md)。
 
 ---
 
@@ -227,13 +233,13 @@ flowchart LR
 
 ## 下载安装
 
-从 [v0.4.1 Release](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.1) 下载与你的电脑匹配的 ZIP：
+从 [v0.4.2 Release](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.2) 下载与你的电脑匹配的 ZIP：
 
 | 系统 | 下载文件 |
 | --- | --- |
-| Windows 10/11 x64 | [`JobMailDesk-Core-v0.4.1-win-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.1/JobMailDesk-Core-v0.4.1-win-x64.zip) |
-| Apple Silicon Mac（M1 及更新） | [`JobMailDesk-Core-v0.4.1-macos-arm64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.1/JobMailDesk-Core-v0.4.1-macos-arm64.zip) |
-| Intel Mac | [`JobMailDesk-Core-v0.4.1-macos-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.1/JobMailDesk-Core-v0.4.1-macos-x64.zip) |
+| Windows 10/11 x64 | [`JobMailDesk-Core-v0.4.2-win-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.2/JobMailDesk-Core-v0.4.2-win-x64.zip) |
+| Apple Silicon Mac（M1 及更新） | [`JobMailDesk-Core-v0.4.2-macos-arm64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.2/JobMailDesk-Core-v0.4.2-macos-arm64.zip) |
+| Intel Mac | [`JobMailDesk-Core-v0.4.2-macos-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.2/JobMailDesk-Core-v0.4.2-macos-x64.zip) |
 
 发布包已经包含 Python 运行时。Windows 需要系统 WebView2，Windows 11 通常已预装；macOS 使用系统 WebKit。
 
@@ -243,12 +249,12 @@ flowchart LR
 
 ```powershell
 # Windows PowerShell
-Get-FileHash .\JobMailDesk-Core-v0.4.1-win-x64.zip -Algorithm SHA256
+Get-FileHash .\JobMailDesk-Core-v0.4.2-win-x64.zip -Algorithm SHA256
 ```
 
 ```bash
 # macOS
-shasum -a 256 JobMailDesk-Core-v0.4.1-macos-arm64.zip
+shasum -a 256 JobMailDesk-Core-v0.4.2-macos-arm64.zip
 ```
 
 输出应与 `.sha256` 文件一致。预览包尚未签名，Windows SmartScreen 或 macOS Gatekeeper 可能显示来源提醒。
@@ -339,6 +345,7 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | [维护、更新与发布规则](docs/MAINTENANCE.md) | 分支、版本号、PR、Release、回滚与完成标准 |
 | [依赖说明](docs/DEPENDENCIES.md) | 终端用户与开发环境依赖 |
 | [架构说明](docs/ARCHITECTURE.md) | 模块、数据流和本地存储 |
+| [企业、项目与阶段标准化](docs/NORMALIZATION.md) | 企业别名、招聘通用词、事业群分链与时间语义 |
 | [隐私说明](PRIVACY.md) | 邮件、凭据与公开研究边界 |
 | [安全说明](SECURITY.md) | 漏洞报告与秘密处理规则 |
 | [贡献指南](CONTRIBUTING.md) | 本地开发、测试和提交规范 |
@@ -346,7 +353,7 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | [完整许可证](LICENSE.md) | 可机器识别的标准 MIT 条款 |
 | [许可说明](docs/LICENSING.md) | 中英文授权摘要、再分发清单与第三方边界 |
 | [Changelog](CHANGELOG.md) | 每个已验收阶段的功能与修复 |
-| [v0.4.1 验收记录](docs/ACCEPTANCE_v0.4.1.md) | 当前版本自动化与发布验证 |
+| [v0.4.2 验收记录](docs/ACCEPTANCE_v0.4.2.md) | 当前版本自动化与发布验证 |
 
 ---
 

@@ -69,3 +69,27 @@ def test_irrelevant_tasks_are_not_exported(tmp_path) -> None:
     output = tmp_path / "todo.md"
     export_dashboard([item], output, Settings(), now=item.received_at)
     assert item.company not in output.read_text(encoding="utf-8")
+
+
+def test_unchecked_confirmed_task_preserves_progress_status(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path / "tasks")
+    item = sample_task()
+    item.status = "confirmed"
+    store.save(item)
+    output = tmp_path / "todo.md"
+    settings = Settings(obsidian_enabled=True, obsidian_output=output)
+    export_dashboard(store.all(), output, settings)
+
+    assert import_checked_states(output, store) == 0
+    assert store.load(item.id).status == "confirmed"  # type: ignore[union-attr]
+
+
+def test_expired_task_does_not_enter_todo_export(tmp_path) -> None:
+    item = sample_task()
+    item.status = "expired"
+    output = tmp_path / "todo.md"
+    export_dashboard([item], output, Settings(), now=item.received_at)
+
+    content = output.read_text(encoding="utf-8")
+    assert item.company not in content
+    assert "已过期但未完成" not in content
