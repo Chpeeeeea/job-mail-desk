@@ -70,6 +70,7 @@ def scan_once(
 ) -> ScanSummary:
     ensure_directories()
     store = MarkdownTaskStore(TASKS_DIR)
+    store.backfill_completed_times()
     state = StateStore(STATE_DB)
     state.prepare_parser_version(PARSER_VERSION)
     run_id = state.begin_scan()

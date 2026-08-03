@@ -72,6 +72,22 @@ def test_markdown_does_not_persist_mail_body(tmp_path) -> None:
     assert "token=secret" in content  # Local task may retain its private source URL.
 
 
+def test_legacy_completion_time_is_backfilled_and_marked_inferred(tmp_path) -> None:
+    item = task()
+    item.status = "done"
+    item.updated_at = datetime(2026, 8, 3, 9, 30, tzinfo=SHANGHAI)
+    store = MarkdownTaskStore(tmp_path)
+    store.save(item)
+    assert store.backfill_completed_times() == 1
+    migrated = store.load(item.id)
+    assert migrated is not None
+    assert migrated.completed_at == item.updated_at
+    assert migrated.completed_at_inferred is True
+    content = store.path_for(item.id).read_text(encoding="utf-8")
+    assert "完成：2026-08-03 09:30（由旧记录更新时间推定）" in content
+    assert "结束：2026-08-02 21:00" in content
+
+
 def test_completed_task_closes_pending_research(tmp_path) -> None:
     item = task()
     request = build_request(item)

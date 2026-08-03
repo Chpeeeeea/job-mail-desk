@@ -80,6 +80,8 @@ class JobTask:
     source_url: str | None = None
     is_ghost: bool = False
     snoozed_until: datetime | None = None
+    completed_at: datetime | None = None
+    completed_at_inferred: bool = False
     updated_at: datetime | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -90,6 +92,7 @@ class JobTask:
             "end_at",
             "deadline_at",
             "snoozed_until",
+            "completed_at",
             "updated_at",
         ):
             value = payload[name]
@@ -137,6 +140,8 @@ class JobTask:
             ),
             is_ghost=bool(payload.get("is_ghost", False)),
             snoozed_until=parse_time("snoozed_until"),
+            completed_at=parse_time("completed_at"),
+            completed_at_inferred=bool(payload.get("completed_at_inferred", False)),
             updated_at=parse_time("updated_at"),
         )
 

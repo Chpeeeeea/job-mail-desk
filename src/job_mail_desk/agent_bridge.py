@@ -5,7 +5,7 @@ from pathlib import Path
 from .config import DASHBOARD_FILE, TASKS_DIR, Settings
 from .exporter import export_dashboard
 from .markdown_store import MarkdownTaskStore
-from .progress import export_progress
+from .progress import export_progress, sync_task_to_ledger
 from .research import close_requests_for_task
 from .task_service import critical_time, edit_task_fields
 
@@ -32,6 +32,8 @@ def _summary(task) -> dict[str, object]:
         "start_at": task.start_at.isoformat() if task.start_at else None,
         "end_at": task.end_at.isoformat() if task.end_at else None,
         "deadline_at": task.deadline_at.isoformat() if task.deadline_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "completed_at_inferred": task.completed_at_inferred,
         "critical_time": target.isoformat() if target else None,
         "action_summary": task.action_summary,
     }
@@ -121,6 +123,8 @@ def apply_task_update(
         if status_value not in ALLOWED_STATUSES:
             raise ValueError(f"不支持的状态：{status_value}")
         task = target_store.update_status(task_id, status_value)
+        if settings.progress_enabled:
+            sync_task_to_ledger(task, settings.progress_source)
         if status_value in {"done", "cancelled", "irrelevant"}:
             close_requests_for_task(
                 settings.research_queue,

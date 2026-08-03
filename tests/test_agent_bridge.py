@@ -39,7 +39,21 @@ def test_agent_update_syncs_obsidian_and_can_restore(tmp_path) -> None:
     task = sample_task()
     store.save(task)
     obsidian = tmp_path / "obsidian.md"
-    settings = Settings(obsidian_enabled=True, obsidian_output=obsidian)
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 京东｜TET 综合方向｜**群面已确认**｜保留准备计划
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    settings = Settings(
+        obsidian_enabled=True,
+        obsidian_output=obsidian,
+        progress_enabled=True,
+        progress_output=tmp_path / "求职当前进展.md",
+        progress_source=ledger,
+    )
 
     completed = apply_task_update(
         settings,
@@ -53,8 +67,17 @@ def test_agent_update_syncs_obsidian_and_can_restore(tmp_path) -> None:
     assert saved is not None
     assert saved.manual_notes == "用户在对话中确认完成"
     assert saved.change_type == "update"
+    assert saved.completed_at is not None
+    assert saved.start_at == datetime(2026, 8, 6, 14, 0, tzinfo=SHANGHAI)
     assert f"jobmaildesk:{task.id}" in obsidian.read_text(encoding="utf-8")
     assert "- [x]" in obsidian.read_text(encoding="utf-8")
+    assert "群面已完成，等待后续" in ledger.read_text(encoding="utf-8")
+    assert f"jobmaildesk:application:{task.application_id}" in ledger.read_text(
+        encoding="utf-8"
+    )
+    progress = settings.progress_output.read_text(encoding="utf-8")
+    assert f"jobmaildesk:application:{task.application_id}" in progress
+    assert f"jobmaildesk:{task.id}" in progress
 
     restored = apply_task_update(
         settings,
@@ -64,6 +87,9 @@ def test_agent_update_syncs_obsidian_and_can_restore(tmp_path) -> None:
         local_dashboard=tmp_path / "dashboard.md",
     )
     assert restored["task"]["status"] == "planned"
+    restored_task = store.load(task.id)
+    assert restored_task is not None
+    assert restored_task.completed_at is None
     assert "- [ ]" in obsidian.read_text(encoding="utf-8")
 
 

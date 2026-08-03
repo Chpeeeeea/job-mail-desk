@@ -6,12 +6,13 @@ from job_mail_desk.progress import (
     create_progress_template,
     export_progress,
     progress_payload,
+    sync_task_to_ledger,
 )
 
 
 def task(task_id: str, stage: str, status: str, hour: int) -> JobTask:
     return JobTask(
-        id=task_id * 24,
+        id=(task_id + "a") * 12,
         application_id="a" * 20,
         company="样例公司",
         role="产品经理",
@@ -55,8 +56,54 @@ def test_progress_groups_application_chain_and_preserves_manual_region(tmp_path)
     export_progress([written, interview], output)
     refreshed = output.read_text(encoding="utf-8")
     assert "样例公司｜产品经理" in refreshed
+    assert "> [!abstract]- 样例公司｜产品经理 · 面试" in refreshed
+    assert "> | 完成时间 | — |" in refreshed
+    assert "> **流程记录**" in refreshed
     assert "面试｜一面｜已安排" in refreshed
+    assert "<!-- jobmaildesk:application:aaaaaaaaaaaaaaaaaaaa -->" in refreshed
+    assert "- [x] 2026-08-06 10:00｜笔试｜已完成 <!-- jobmaildesk:1a1a1a1a1a1a1a1a1a1a1a1a -->" in refreshed
+    assert "- [ ] 2026-08-06 14:00｜面试｜一面｜已安排 <!-- jobmaildesk:2a2a2a2a2a2a2a2a2a2a2a2a -->" in refreshed
     assert "我的手动判断" in refreshed
+
+
+def test_completed_task_updates_only_exact_ledger_row(tmp_path) -> None:
+    completed = task("6", "人才测评", "done", 12)
+    completed.company = "科大讯飞"
+    completed.role = "AI产品经理"
+    completed.application_id = "c" * 20
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """# 岗位投递决策台账
+
+### 已投递或已进入流程
+
+- [ ] 科大讯飞｜AI 产品经理（J13348）｜**已投递**｜保留我的下一步动作
+- [x] 科大讯飞｜项目经理（J10000）｜**一面已确认**｜不要修改这一行
+
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    assert sync_task_to_ledger(completed, ledger) == 1
+    content = ledger.read_text(encoding="utf-8")
+    assert "- [ ] 科大讯飞｜AI 产品经理（J13348）｜**人才测评已完成，等待后续**｜保留我的下一步动作" in content
+    assert "<!-- jobmaildesk:application:cccccccccccccccccccc -->" in content
+    assert "项目经理（J10000）｜**一面已确认**｜不要修改这一行" in content
+
+
+def test_ledger_sync_refuses_ambiguous_role_match(tmp_path) -> None:
+    completed = task("7", "笔试", "done", 12)
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**已投递**｜第一条
+- [x] 样例公司｜产品经理｜**已投递**｜第二条
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    assert sync_task_to_ledger(completed, ledger) == 0
+    assert "笔试已完成" not in ledger.read_text(encoding="utf-8")
 
 
 def test_irrelevant_items_do_not_enter_progress() -> None:

@@ -220,6 +220,7 @@ class DesktopApi:
         self._editor_geometry: tuple[int, int, int, int] | None = None
         self._dashboard_lock = threading.Lock()
         self._updates = UpdateManager()
+        MarkdownTaskStore(TASKS_DIR).backfill_completed_times()
 
     def get_dashboard(self) -> dict[str, object]:
         with self._dashboard_lock:
