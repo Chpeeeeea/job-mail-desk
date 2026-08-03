@@ -11,7 +11,7 @@ from .privacy import redact_text
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-PARSER_VERSION = "2026.08.01.10"
+PARSER_VERSION = "2026.08.03.3"
 URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 RECRUITING_KEYWORDS = (
     "笔试",
@@ -71,6 +71,10 @@ RELATIVE_DEADLINE = re.compile(
     r"[^。；;]{0,16}?"
     r"(?P<amount>\d{1,3})\s*(?P<unit>小时|天)(?:内|之内)"
 )
+DURATION = re.compile(
+    r"(?:面试|测评|笔试|预计)?时长\s*[:：]?\s*(?P<minutes>\d{1,3})\s*(?:分钟|min(?:ute)?s?)",
+    re.IGNORECASE,
+)
 ROLE_PATTERNS = (
     re.compile(r"(?:邀请您参加|邀请你参加)\s*([^，。\n]{2,60}?)\s*岗位"),
     re.compile(r"感谢您投递[^\n，。]{2,120}[）)]([^，。]{2,40})，现邀请"),
@@ -110,6 +114,21 @@ def _dt(
     return value + timedelta(days=1) if parsed_hour == 24 else value
 
 
+def _try_dt(
+    year: str | None,
+    month: str,
+    day: str,
+    hour: str,
+    minute: str,
+    received: datetime,
+) -> datetime | None:
+    """Ignore numeric fragments that resemble dates but are not calendar values."""
+    try:
+        return _dt(year, month, day, hour, minute, received)
+    except ValueError:
+        return None
+
+
 def _times(
     text: str,
     received: datetime,
@@ -119,25 +138,35 @@ def _times(
     same = SAME_DAY_RANGE.search(text) if not full else None
     if full:
         g = full.groupdict()
-        start = _dt(g["sy"], g["sm"], g["sd"], g["sh"], g["smin"], received)
-        end = _dt(g["ey"], g["em"], g["ed"], g["eh"], g["emin"], received)
+        candidate_start = _try_dt(
+            g["sy"], g["sm"], g["sd"], g["sh"], g["smin"], received
+        )
+        candidate_end = _try_dt(
+            g["ey"], g["em"], g["ed"], g["eh"], g["emin"], received
+        )
+        if candidate_start and candidate_end:
+            start, end = candidate_start, candidate_end
     elif same:
         g = same.groupdict()
-        start = _dt(g["y"], g["m"], g["d"], g["sh"], g["smin"], received)
-        end_hour = int(g["eh"])
-        end = start.replace(
-            hour=0 if end_hour == 24 else end_hour,
-            minute=int(g["emin"]),
+        candidate_start = _try_dt(
+            g["y"], g["m"], g["d"], g["sh"], g["smin"], received
         )
-        if end_hour == 24:
-            end += timedelta(days=1)
-        if end <= start:
-            end += timedelta(days=1)
+        if candidate_start:
+            start = candidate_start
+            end_hour = int(g["eh"])
+            end = start.replace(
+                hour=0 if end_hour == 24 else end_hour,
+                minute=int(g["emin"]),
+            )
+            if end_hour == 24:
+                end += timedelta(days=1)
+            if end <= start:
+                end += timedelta(days=1)
     datetime_matches = [*DATETIME.finditer(text), *CN_DATETIME.finditer(text)]
     datetime_matches.sort(key=lambda item: item.start())
     for match in datetime_matches:
         g = match.groupdict()
-        candidate = _dt(
+        candidate = _try_dt(
             g["y"],
             g["m"],
             g["d"],
@@ -145,6 +174,8 @@ def _times(
             g.get("min") or "00",
             received,
         )
+        if candidate is None:
+            continue
         before = text[max(0, match.start() - 36) : match.start()]
         after = text[match.end() : match.end() + 20]
         deadline_before = re.search(
@@ -175,10 +206,20 @@ def _times(
                     else timedelta(days=amount)
                 )
                 deadline = received + delta
+    if start and end is None:
+        duration = DURATION.search(text)
+        if duration:
+            minutes = int(duration.group("minutes"))
+            if 5 <= minutes <= 480:
+                end = start + timedelta(minutes=minutes)
     return start, end, deadline
 
 
 def _stage(subject: str, body: str) -> str:
+    if re.search(r"群面|综合面", subject) or re.search(
+        r"面试方式\s*[:：].{0,16}群面", body
+    ):
+        return "群面"
     if re.search(r"待(?:你|您)?\s*(?:完成|提交)网申|完成网申后", f"{subject} {body}"):
         return "招聘通知"
     if re.search(r"应聘结果反馈", subject) and re.search(
@@ -207,6 +248,7 @@ def _event_type(stage: str) -> str:
         "人才测评": "assessment",
         "AI 面试": "interview",
         "HR 面试": "interview",
+        "群面": "interview",
         "面试": "interview",
         "材料截止": "deadline",
         "简历完善": "deadline",
@@ -307,7 +349,7 @@ def _project(text: str) -> str | None:
 
 
 def _round(text: str) -> str | None:
-    for label in ("终面", "一面", "二面", "三面", "四面", "HR面", "HR 面"):
+    for label in ("群面", "终面", "一面", "二面", "三面", "四面", "HR面", "HR 面"):
         if label in text:
             return label.replace(" ", "")
     match = re.search(r"第\s*(\d+)\s*轮", text)
@@ -356,6 +398,8 @@ def parse_record(record: MailRecord) -> ParsedEvent | None:
     start, end, deadline = _times(combined, record.received_at.astimezone(SHANGHAI))
     company = _company(subject, record.sender)
     role = _role(record.body)
+    if not role and re.search(r"TET\s*综合(?:面|方向)", subject, re.IGNORECASE):
+        role = "TET 综合方向"
     project = _project(combined)
     if company == "网易招聘" and project and re.search(r"雷火事业群|互娱事业群", project):
         company = "网易游戏"
@@ -379,6 +423,9 @@ def parse_record(record: MailRecord) -> ParsedEvent | None:
         requirements = ()
     elif stage == "Offer":
         action = "核对 Offer 内容、回复要求和明确截止时间。"
+    elif stage == "群面":
+        identity = " ".join(item for item in (company, role) if item)
+        action = f"参加{identity}群面；提前准备并核对会议入口。"
     else:
         action = requirements[0] if requirements else redact_text(subject)
     return ParsedEvent(
