@@ -87,6 +87,27 @@ def test_chinese_hour_minute_deadline() -> None:
     assert event.start_at is None
 
 
+def test_phone_number_fragment_does_not_break_valid_chinese_datetime() -> None:
+    event = parse_record(
+        mail(
+            "【京东校招】2027 TET 综合面面试通知",
+            (
+                "紧急事宜请致电400-618-5106（服务时间为工作日9:00-18:00）。"
+                "面试方式：视频面试（群面）。"
+                "面试时间：2026年08月06日 14点00分，面试时长60分钟。"
+            ),
+        )
+    )
+    assert event is not None
+    assert event.start_at == datetime(2026, 8, 6, 14, 0, tzinfo=SHANGHAI)
+    assert event.end_at == datetime(2026, 8, 6, 15, 0, tzinfo=SHANGHAI)
+    assert event.stage == "群面"
+    assert event.event_type == "interview"
+    assert event.round == "群面"
+    assert event.role == "TET 综合方向"
+    assert "400-618-5106" not in event.action_summary
+
+
 def test_iflytek_validity_window_beats_conditional_rejection(tmp_path) -> None:
     record = mail(
         "【讯飞招聘】测评通知：科大讯飞邀请您参与校园招聘在线测评",

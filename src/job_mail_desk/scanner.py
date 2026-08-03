@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+import logging
 
 from .config import DASHBOARD_FILE, STATE_DB, TASKS_DIR, Settings, ensure_directories
 from .credentials import load_credential
@@ -15,12 +16,16 @@ from .state import StateStore
 from .task_service import critical_time, message_hash, task_from_event
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 @dataclass(frozen=True)
 class ScanSummary:
     fetched: int
     skipped: int
     candidates: int
     tasks_updated: int
+    parse_failed: int
     research_queued: int
     urgent: int
     exported: int
@@ -68,7 +73,7 @@ def scan_once(
     state = StateStore(STATE_DB)
     state.prepare_parser_version(PARSER_VERSION)
     run_id = state.begin_scan()
-    fetched = skipped = candidates = updated = queued = urgent = exported = 0
+    fetched = skipped = candidates = updated = parse_failed = queued = urgent = exported = 0
     preview: list[dict[str, object]] = []
     try:
         if settings.obsidian_enabled:
@@ -82,7 +87,19 @@ def scan_once(
             if state.is_processed(source_hash):
                 skipped += 1
                 continue
-            event = parse_record(record)
+            try:
+                event = parse_record(record)
+            except Exception as exc:
+                # A malformed template must not block every later message. Keep
+                # it unprocessed so a future parser update can retry it.
+                parse_failed += 1
+                LOGGER.exception(
+                    "邮件解析失败，已隔离 uid=%s hash=%s error=%s",
+                    record.uid,
+                    source_hash[:12],
+                    type(exc).__name__,
+                )
+                continue
             task_identifier = None
             if event:
                 candidates += 1
@@ -159,6 +176,7 @@ def scan_once(
             skipped=skipped,
             candidates=candidates,
             tasks_updated=updated,
+            parse_failed=parse_failed,
             research_queued=queued,
             urgent=urgent,
             exported=exported,
