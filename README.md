@@ -13,29 +13,29 @@
 [![Build](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml/badge.svg)](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml)
 [![License](https://img.shields.io/github/license/Chpeeeeea/job-mail-desk?color=25231f)](LICENSE.md)
 
-[下载 v0.5.0](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.5.0) · [快速开始](docs/CORE_QUICKSTART.md) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md)
+[下载 v0.6.0](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.6.0) · [快速开始](docs/CORE_QUICKSTART.md) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md)
 
 **无需安装 Python · 无需大模型 · 无需 API Key · 国内网络可直接运行 Core**
 
 </div>
 
 > [!IMPORTANT]
-> 当前为 `v0.5.0` 预览版。Windows 与 macOS 发布包尚未完成代码签名或 Apple 公证，请只从本仓库 Release 下载，并核对同名 `.sha256` 文件。真实邮件、授权码、本地任务和私人链接不会进入公开仓库。
+> 当前为 `v0.6.0` 预览版。Windows 与 macOS 发布包尚未完成代码签名或 Apple 公证，请只从本仓库 Release 下载，并核对同名 `.sha256` 文件。真实邮件、授权码、本地任务和私人链接不会进入公开仓库。
 
 ---
 
-## v0.5.0 有什么新变化
+## v0.6.0 有什么新变化
 
-| 能力 | v0.5.0 的处理方式 |
+| 能力 | v0.6.0 的处理方式 |
 | --- | --- |
-| **申请身份解析** | 邮件先按企业、招聘项目、岗位、职位编号和批次上下文归属，再生成任务；通用网申回执不会单独创建申请链。 |
-| **内置基础词典** | 随程序提供 520 家企业、129 个招聘项目和 2825 个岗位名称，无需模型或 API 即可参与标准化。 |
-| **个人词典** | 设置页可选择 XLSX 招聘表并在本机编译启用；源表不会上传，也不会复制进公开仓库。 |
-| **待归属缓冲区** | 无法唯一判断、旧 ID 冲突或跨项目冲突的邮件会安全进入 `unresolved`，不再强行猜测。 |
-| **兼容旧数据** | 保留既有 `application_id`、任务 Markdown 和 Obsidian 标记；仅在映射唯一时补充 canonical `application_key`。 |
-| **更稳的桌面体验** | 设置页不再造成窗口尺寸跳变；Obsidian 临时占用台账时不会中断整批邮箱扫描。 |
+| **多邮箱预设** | 设置页可选择 QQ、网易 163、网易 126、Yeah、Gmail、Outlook 或自定义 IMAP。 |
+| **参数仍可编辑** | 选择服务商后会填写默认主机、端口和 SSL/TLS，但用户仍可按邮箱实际要求修改。 |
+| **保存前测试** | “测试只读邮箱连接”直接使用当前表单值，不必先覆盖已经可用的配置。 |
+| **旧配置兼容** | 只有主机和端口的旧 QQ/IMAP 配置会自动推断服务商，未知主机归入自定义。 |
+| **只读边界不变** | SSL 与普通 IMAP 均继续使用只读文件夹和 `BODY.PEEK`，不删除、移动或主动标记已读。 |
+| **安全依赖升级** | `cryptography` 升级到 50.0.0，消除 GitHub 标记的 49.x 高危安全版本范围。 |
 
-这次升级的重点不是“识别更多关键词”，而是让每一封招聘邮件先回答三个问题：它属于哪家公司、哪次申请、哪一个流程节点。无法可靠回答时，JobMailDesk 会停止自动归属并等待人工确认。
+这次升级让“秋招小组件”不再绑定 QQ 邮箱。只要邮箱开放标准 IMAP 并允许客户端授权码或应用专用密码，就可以使用预设或自定义参数连接；部分强制 OAuth 的 Outlook 账户暂不支持。
 
 ---
 
@@ -269,13 +269,13 @@ flowchart LR
 
 ## 下载安装
 
-从 [v0.5.0 Release](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.5.0) 下载与你的电脑匹配的 ZIP：
+从 [v0.6.0 Release](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.6.0) 下载与你的电脑匹配的 ZIP：
 
 | 系统 | 下载文件 |
 | --- | --- |
-| Windows 10/11 x64 | [`JobMailDesk-Core-v0.5.0-win-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.5.0/JobMailDesk-Core-v0.5.0-win-x64.zip) |
-| Apple Silicon Mac（M1 及更新） | [`JobMailDesk-Core-v0.5.0-macos-arm64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.5.0/JobMailDesk-Core-v0.5.0-macos-arm64.zip) |
-| Intel Mac | [`JobMailDesk-Core-v0.5.0-macos-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.5.0/JobMailDesk-Core-v0.5.0-macos-x64.zip) |
+| Windows 10/11 x64 | [`JobMailDesk-Core-v0.6.0-win-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.6.0/JobMailDesk-Core-v0.6.0-win-x64.zip) |
+| Apple Silicon Mac（M1 及更新） | [`JobMailDesk-Core-v0.6.0-macos-arm64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.6.0/JobMailDesk-Core-v0.6.0-macos-arm64.zip) |
+| Intel Mac | [`JobMailDesk-Core-v0.6.0-macos-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.6.0/JobMailDesk-Core-v0.6.0-macos-x64.zip) |
 
 发布包已经包含 Python 运行时。Windows 需要系统 WebView2，Windows 11 通常已预装；macOS 使用系统 WebKit。
 
@@ -285,12 +285,12 @@ flowchart LR
 
 ```powershell
 # Windows PowerShell
-Get-FileHash .\JobMailDesk-Core-v0.5.0-win-x64.zip -Algorithm SHA256
+Get-FileHash .\JobMailDesk-Core-v0.6.0-win-x64.zip -Algorithm SHA256
 ```
 
 ```bash
 # macOS
-shasum -a 256 JobMailDesk-Core-v0.5.0-macos-arm64.zip
+shasum -a 256 JobMailDesk-Core-v0.6.0-macos-arm64.zip
 ```
 
 输出应与 `.sha256` 文件一致。预览包尚未签名，Windows SmartScreen 或 macOS Gatekeeper 可能显示来源提醒。
@@ -378,7 +378,8 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | --- | --- |
 | [Core 快速开始](docs/CORE_QUICKSTART.md) | 首次安装、邮箱和进展台账配置 |
 | [版本通知与更新](docs/UPDATES.md) | 更新通道、手动覆盖与失败边界 |
-| [v0.5.0 Release Notes](docs/RELEASE_NOTES_v0.5.0.md) | 本次身份解析、词典、待归属和可靠性更新 |
+| [v0.6.0 Release Notes](docs/RELEASE_NOTES_v0.6.0.md) | 多邮箱设置、自定义 IMAP 与安全依赖升级 |
+| [v0.5.0 Release Notes](docs/RELEASE_NOTES_v0.5.0.md) | 身份解析、词典、待归属和可靠性更新 |
 | [身份词典说明](docs/IDENTITY_DICTIONARIES.md) | 内置词典、XLSX 导入、优先级与安全限制 |
 | [维护、更新与发布规则](docs/MAINTENANCE.md) | 分支、版本号、PR、Release、回滚与完成标准 |
 | [依赖说明](docs/DEPENDENCIES.md) | 终端用户与开发环境依赖 |
@@ -391,8 +392,8 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | [完整许可证](LICENSE.md) | 可机器识别的标准 MIT 条款 |
 | [许可说明](docs/LICENSING.md) | 中英文授权摘要、再分发清单与第三方边界 |
 | [Changelog](CHANGELOG.md) | 每个已验收阶段的功能与修复 |
-| [v0.5.0 验收记录](docs/ACCEPTANCE_v0.5.0.md) | 当前版本自动化与发布验证 |
-| [v0.4.2 验收记录](docs/ACCEPTANCE_v0.4.2.md) | 上一版本自动化与发布验证 |
+| [v0.6.0 验收记录](docs/ACCEPTANCE_v0.6.0.md) | 当前版本自动化与发布验证 |
+| [v0.5.0 验收记录](docs/ACCEPTANCE_v0.5.0.md) | 上一版本自动化与发布验证 |
 
 ---
 

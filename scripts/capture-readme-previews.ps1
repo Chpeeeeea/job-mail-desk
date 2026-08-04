@@ -41,13 +41,13 @@ $mockApi = @"
           progress_source: "D:\\Obsidian\\application-ledger.md",
           updates_enabled: false,
           update_channel: "preview",
-          app_version: "0.5.0"
+          app_version: "0.6.0"
         }),
         get_dictionary_status: async () => ({
           counts: { companies: 520, programs: 129, roles: 2825, mail_templates: 4 },
           user_dictionary_enabled: false
         }),
-        get_update_status: async () => ({ state: "idle", current_version: "0.5.0" }),
+        get_update_status: async () => ({ state: "idle", current_version: "0.6.0" }),
         maybe_check_for_updates: async () => null,
         set_editor_mode: async () => null,
         set_capsule: async () => null,

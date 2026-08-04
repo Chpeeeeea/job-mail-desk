@@ -4,6 +4,8 @@ JobMailDesk 使用语义化版本号。每个可验证阶段必须先更新本�
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-04
+
 ### Added
 
 - 设置页新增 QQ、网易 163、网易 126、Yeah、Gmail、Outlook 与自定义 IMAP 服务商选项；选择预设后仍可编辑主机、端口与 SSL/TLS。
