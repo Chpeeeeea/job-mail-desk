@@ -13,14 +13,29 @@
 [![Build](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml/badge.svg)](https://github.com/Chpeeeeea/job-mail-desk/actions/workflows/build-core.yml)
 [![License](https://img.shields.io/github/license/Chpeeeeea/job-mail-desk?color=25231f)](LICENSE.md)
 
-[下载 v0.4.2](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.2) · [快速开始](docs/CORE_QUICKSTART.md) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md)
+[下载 v0.5.0](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.5.0) · [快速开始](docs/CORE_QUICKSTART.md) · [隐私说明](PRIVACY.md) · [更新日志](CHANGELOG.md)
 
 **无需安装 Python · 无需大模型 · 无需 API Key · 国内网络可直接运行 Core**
 
 </div>
 
 > [!IMPORTANT]
-> 当前为 `v0.4.2` 预览版。Windows 与 macOS 发布包尚未完成代码签名或 Apple 公证，请只从本仓库 Release 下载，并核对同名 `.sha256` 文件。真实邮件、授权码、本地任务和私人链接不会进入公开仓库。
+> 当前为 `v0.5.0` 预览版。Windows 与 macOS 发布包尚未完成代码签名或 Apple 公证，请只从本仓库 Release 下载，并核对同名 `.sha256` 文件。真实邮件、授权码、本地任务和私人链接不会进入公开仓库。
+
+---
+
+## v0.5.0 有什么新变化
+
+| 能力 | v0.5.0 的处理方式 |
+| --- | --- |
+| **申请身份解析** | 邮件先按企业、招聘项目、岗位、职位编号和批次上下文归属，再生成任务；通用网申回执不会单独创建申请链。 |
+| **内置基础词典** | 随程序提供 520 家企业、129 个招聘项目和 2825 个岗位名称，无需模型或 API 即可参与标准化。 |
+| **个人词典** | 设置页可选择 XLSX 招聘表并在本机编译启用；源表不会上传，也不会复制进公开仓库。 |
+| **待归属缓冲区** | 无法唯一判断、旧 ID 冲突或跨项目冲突的邮件会安全进入 `unresolved`，不再强行猜测。 |
+| **兼容旧数据** | 保留既有 `application_id`、任务 Markdown 和 Obsidian 标记；仅在映射唯一时补充 canonical `application_key`。 |
+| **更稳的桌面体验** | 设置页不再造成窗口尺寸跳变；Obsidian 临时占用台账时不会中断整批邮箱扫描。 |
+
+这次升级的重点不是“识别更多关键词”，而是让每一封招聘邮件先回答三个问题：它属于哪家公司、哪次申请、哪一个流程节点。无法可靠回答时，JobMailDesk 会停止自动归属并等待人工确认。
 
 ---
 
@@ -128,7 +143,9 @@ JobMailDesk Core 是已经包含运行环境的桌面程序。普通用户不需
 - 每个任务单独保存为 `tasks/<id>.md`，包含稳定 ID 和 YAML frontmatter。
 - 可选导出标准 `- [ ]` 与 `📅 YYYY-MM-DD` 语法到任意 Obsidian Vault。
 - Obsidian 勾选状态可以同步回桌面卡片，手写区域不会被自动刷新覆盖。
-- 可生成独立求职进展文档，并合并用户维护的岗位投递台账。
+- 可生成独立求职进展文档；申请链和流程节点携带稳定 ID，完成项显示为已勾选。
+- 求职进展按岗位生成默认折叠的 Obsidian 卡片，展开后用表格展示企业、岗位、项目、阶段、轮次、活动窗口、截止时间、完成时间、下一步和流程历史。
+- 可关联用户维护的岗位投递台账。组件完成任务时，仅在稳定 ID 或“公司 + 岗位/J 编号”唯一匹配后更新当前进展，不覆盖下一步动作和其他手写内容。
 - 每日 `08:00 / 13:00 / 20:00` 生成早、中、晚本地简报。
 
 ---
@@ -179,6 +196,8 @@ flowchart LR
 
 完成、恢复、延后和忽略采用二次点击确认：首次点击进入 3 秒确认态，再次点击才执行，避免误触。
 
+完成操作会同步本地任务、Obsidian 待办总览和自动生成的求职进展。若设置了人工岗位台账，程序只在目标行能够唯一确认时更新“当前进展”字段并绑定稳定申请 ID；匹配不唯一时保持台账不变，避免串改同一企业的其他岗位。
+
 ### 手动新建与编辑
 
 点击右上角 `＋` 可以新建任务。至少填写“公司/事项”和“下一步行动”；开始、结束和硬截止均可独立设置。保存后会同步刷新：
@@ -221,6 +240,15 @@ flowchart LR
 - 可选择独立的求职进展输出文档；
 - 可选择手动岗位投递台账；
 - “生成规范台账模板”只在目标文件不存在时创建，不覆盖已有内容。
+- 规范行格式为 `公司｜岗位｜当前进展｜下一步动作`；组件状态同步只修改第三段，第四段及其他手写内容始终保留。
+
+### 企业与岗位词典
+
+- Core 内置 520 家企业、129 个招聘项目和 2825 个岗位名称，无需模型或 API；
+- 设置页可以选择自己的 XLSX 秋招表，并指定包含“公司及项目名称/职位名称”的工作表；
+- 编译只在本机进行，源表不会复制进 JobMailDesk，也不会保存源路径；
+- 个人导入结果进入 `dictionaries/imported/`，手工维护的 `dictionaries/manual/` 具有最高优先级；
+- 通用网申回执不会仅凭公司名称创建申请，无法唯一归属的邮件进入本地待归属缓冲区。
 
 ### 版本通知
 
@@ -233,13 +261,13 @@ flowchart LR
 
 ## 下载安装
 
-从 [v0.4.2 Release](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.4.2) 下载与你的电脑匹配的 ZIP：
+从 [v0.5.0 Release](https://github.com/Chpeeeeea/job-mail-desk/releases/tag/v0.5.0) 下载与你的电脑匹配的 ZIP：
 
 | 系统 | 下载文件 |
 | --- | --- |
-| Windows 10/11 x64 | [`JobMailDesk-Core-v0.4.2-win-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.2/JobMailDesk-Core-v0.4.2-win-x64.zip) |
-| Apple Silicon Mac（M1 及更新） | [`JobMailDesk-Core-v0.4.2-macos-arm64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.2/JobMailDesk-Core-v0.4.2-macos-arm64.zip) |
-| Intel Mac | [`JobMailDesk-Core-v0.4.2-macos-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.4.2/JobMailDesk-Core-v0.4.2-macos-x64.zip) |
+| Windows 10/11 x64 | [`JobMailDesk-Core-v0.5.0-win-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.5.0/JobMailDesk-Core-v0.5.0-win-x64.zip) |
+| Apple Silicon Mac（M1 及更新） | [`JobMailDesk-Core-v0.5.0-macos-arm64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.5.0/JobMailDesk-Core-v0.5.0-macos-arm64.zip) |
+| Intel Mac | [`JobMailDesk-Core-v0.5.0-macos-x64.zip`](https://github.com/Chpeeeeea/job-mail-desk/releases/download/v0.5.0/JobMailDesk-Core-v0.5.0-macos-x64.zip) |
 
 发布包已经包含 Python 运行时。Windows 需要系统 WebView2，Windows 11 通常已预装；macOS 使用系统 WebKit。
 
@@ -249,12 +277,12 @@ flowchart LR
 
 ```powershell
 # Windows PowerShell
-Get-FileHash .\JobMailDesk-Core-v0.4.2-win-x64.zip -Algorithm SHA256
+Get-FileHash .\JobMailDesk-Core-v0.5.0-win-x64.zip -Algorithm SHA256
 ```
 
 ```bash
 # macOS
-shasum -a 256 JobMailDesk-Core-v0.4.2-macos-arm64.zip
+shasum -a 256 JobMailDesk-Core-v0.5.0-macos-arm64.zip
 ```
 
 输出应与 `.sha256` 文件一致。预览包尚未签名，Windows SmartScreen 或 macOS Gatekeeper 可能显示来源提醒。
@@ -342,6 +370,8 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | --- | --- |
 | [Core 快速开始](docs/CORE_QUICKSTART.md) | 首次安装、邮箱和进展台账配置 |
 | [版本通知与更新](docs/UPDATES.md) | 更新通道、手动覆盖与失败边界 |
+| [v0.5.0 Release Notes](docs/RELEASE_NOTES_v0.5.0.md) | 本次身份解析、词典、待归属和可靠性更新 |
+| [身份词典说明](docs/IDENTITY_DICTIONARIES.md) | 内置词典、XLSX 导入、优先级与安全限制 |
 | [维护、更新与发布规则](docs/MAINTENANCE.md) | 分支、版本号、PR、Release、回滚与完成标准 |
 | [依赖说明](docs/DEPENDENCIES.md) | 终端用户与开发环境依赖 |
 | [架构说明](docs/ARCHITECTURE.md) | 模块、数据流和本地存储 |
@@ -353,7 +383,8 @@ Research 仍是独立可选扩展。Core 不会因为没有安装 Research 而�
 | [完整许可证](LICENSE.md) | 可机器识别的标准 MIT 条款 |
 | [许可说明](docs/LICENSING.md) | 中英文授权摘要、再分发清单与第三方边界 |
 | [Changelog](CHANGELOG.md) | 每个已验收阶段的功能与修复 |
-| [v0.4.2 验收记录](docs/ACCEPTANCE_v0.4.2.md) | 当前版本自动化与发布验证 |
+| [v0.5.0 验收记录](docs/ACCEPTANCE_v0.5.0.md) | 当前版本自动化与发布验证 |
+| [v0.4.2 验收记录](docs/ACCEPTANCE_v0.4.2.md) | 上一版本自动化与发布验证 |
 
 ---
 
@@ -384,11 +415,18 @@ jobmaildesk scan --once [--days N] [--shadow]
 jobmaildesk run
 jobmaildesk digest morning|noon|evening
 jobmaildesk export [--obsidian]
+jobmaildesk dictionary-check
+jobmaildesk dictionary-compile --xlsx WORKBOOK.xlsx --output DICTIONARY_DIR [--sheet 工作表]
+jobmaildesk unresolved-list
+jobmaildesk unresolved-resolve SOURCE_HASH --application-key KEY
+jobmaildesk unresolved-ignore SOURCE_HASH
 jobmaildesk task-list [--company 公司] [--role 岗位] [--stage 阶段]
 jobmaildesk task-update TASK_ID [--status done|planned|needs_review|cancelled|irrelevant]
 jobmaildesk ui
 jobmaildesk show
 ```
+
+`unresolved` 命令只处理本地脱敏记录：无法唯一归属的邮件不会强行生成申请链，人工选择现有 `application_key` 后才会进入正式任务流程。
 
 ### 测试与构建
 

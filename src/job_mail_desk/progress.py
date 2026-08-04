@@ -8,6 +8,12 @@ import re
 
 from .markdown_store import _atomic_write
 from .models import JobTask
+from .normalization import (
+    canonical_role,
+    is_invalid_role,
+    normalize_company_project,
+    role_key,
+)
 from .parser import SHANGHAI
 from .privacy import redact_text
 from .task_service import critical_time
@@ -15,6 +21,18 @@ from .task_service import critical_time
 
 MANAGED_START = "<!-- jobmaildesk:progress-start -->"
 MANAGED_END = "<!-- jobmaildesk:progress-end -->"
+APPLICATION_MARKER = re.compile(
+    r"<!--\s*jobmaildesk:application:(?P<id>(?:app-)?[0-9a-f]{20,64})\s*-->"
+)
+JOB_CODE = re.compile(r"\b([A-Za-z]\d{4,})\b", re.IGNORECASE)
+
+
+def _application_identity(task: JobTask) -> str:
+    return task.application_key or task.application_id
+
+
+def _task_marker_ids(task: JobTask) -> set[str]:
+    return {item for item in (task.application_key, task.application_id) if item}
 
 
 def create_progress_template(path: Path) -> bool:
@@ -31,13 +49,14 @@ updated: {today}
 
 # 求职进展台账
 
-> 每行使用：公司｜岗位｜当前进展｜下一步动作。JobMailDesk只读取下方“已投递或已进入流程”区域，不覆盖你的手写内容。
+> 每行使用：公司｜岗位｜当前进展｜下一步动作。JobMailDesk只读取下方“已投递或已进入流程”区域。
+> 当公司和岗位能够唯一匹配时，组件完成任务会更新“当前进展”并在行尾写入稳定申请 ID；不会覆盖下一步动作和其他手写区域。
 
 ## 当前进展
 
 ### 已投递或已进入流程
 
-<!-- 示例：- [x] 示例公司｜产品经理｜**一面已确认**｜8月6日14:00参加面试 -->
+<!-- 示例：- [x] 示例公司｜产品经理｜**一面已确认**｜8月6日14:00参加面试；首次成功同步后，程序会在行尾加入稳定申请 ID。 -->
 
 ### 当前优先待投
 
@@ -47,6 +66,7 @@ updated: {today}
 
 - `[x]`：已经投递或进入流程。
 - 当前进展建议使用：已投递、测评、笔试、一面、二面、群面、Offer、未通过、已结束。
+- 已完成节点建议保留日期，例如：`2026-08-03 人才测评已完成，等待后续`；截止时间与完成时间必须分开。
 - 同一岗位进展变化时更新原行，不要重复追加相同岗位。
 """
     _atomic_write(path, content)
@@ -55,6 +75,8 @@ updated: {today}
 
 def _event_time(task: JobTask) -> datetime:
     return (
+        (task.completed_at if task.status == "done" else None)
+        or
         critical_time(task)
         or task.updated_at
         or task.received_at
@@ -74,12 +96,178 @@ def _status_label(status: str) -> str:
 
 
 def _company_key(value: str) -> str:
-    cleaned = re.sub(r"[\s（）()【】\[\]]+", "", value).casefold()
+    normalized, _project = normalize_company_project(value)
+    cleaned = re.sub(r"[\s（）()【】\[\]]+", "", normalized).casefold()
     cleaned = re.sub(r"(?:校园招聘|校招)$", "", cleaned)
     return {
         "deeproute.ai": "元戎启行",
         "深圳元戎启行科技有限公司": "元戎启行",
     }.get(cleaned, cleaned)
+
+
+def _role_key(value: str) -> str:
+    without_code = JOB_CODE.sub("", value)
+    normalized = canonical_role(without_code) or without_code
+    return role_key(normalized)
+
+
+def _job_codes(value: str) -> set[str]:
+    return {match.upper() for match in JOB_CODE.findall(value)}
+
+
+def _same_role(left: str, right: str) -> bool:
+    left_codes = _job_codes(left)
+    right_codes = _job_codes(right)
+    if left_codes and right_codes:
+        return bool(left_codes & right_codes)
+    left_key = _role_key(left)
+    right_key = _role_key(right)
+    return bool(left_key and right_key and left_key == right_key)
+
+
+def _best_role(chain: list[JobTask]) -> str | None:
+    roles = [
+        role
+        for item in chain
+        if (role := canonical_role(item.role)) and not is_invalid_role(role)
+    ]
+    if not roles:
+        return None
+    counts = {role: roles.count(role) for role in set(roles)}
+    return max(roles, key=lambda role: (counts[role], -len(role)))
+
+
+def _progress_status(task: JobTask) -> str:
+    stage = (task.round or task.stage or "流程").strip()
+    if task.event_type == "application" and task.status == "confirmed":
+        return f"{task.received_at:%Y-%m-%d} 网申已提交，等待简历筛选"
+    if task.status == "done":
+        completed = ""
+        if task.completed_at:
+            prefix = "约" if task.completed_at_inferred else ""
+            completed = f"{prefix}{task.completed_at:%Y-%m-%d} "
+        if any(label in stage for label in ("测评", "笔试", "面试", "群面")):
+            return f"{completed}{stage}已完成，等待后续"
+        if "投递" in stage or "网申" in stage:
+            return f"{completed}已投递，等待筛选"
+        return f"{completed}{stage}已完成"
+    if task.status == "planned":
+        return f"{stage}已安排"
+    if task.status == "confirmed":
+        return f"{stage}已确认"
+    if task.status == "cancelled":
+        return f"{stage}已取消"
+    if task.status == "expired":
+        return f"{stage}已过期"
+    return _status_label(task.status)
+
+
+def sync_task_to_ledger(task: JobTask, path: Path | None) -> int:
+    """Update one uniquely matched ledger row without touching user-owned fields."""
+    if not path or not path.exists() or task.status == "irrelevant":
+        return 0
+    content = path.read_text(encoding="utf-8")
+    marker = "### 已投递或已进入流程"
+    if marker not in content:
+        return 0
+    prefix, section_and_suffix = content.split(marker, 1)
+    if "\n### " in section_and_suffix:
+        section, suffix = section_and_suffix.split("\n### ", 1)
+        suffix = "\n### " + suffix
+    else:
+        section, suffix = section_and_suffix, ""
+
+    candidates: list[tuple[int, str, list[str], str]] = []
+    lines = section.splitlines()
+    for index, line in enumerate(lines):
+        if not re.match(r"^- \[[ xX]\] ", line):
+            continue
+        marker_match = APPLICATION_MARKER.search(line)
+        clean_line = APPLICATION_MARKER.sub("", line).rstrip()
+        body = clean_line.split("] ", 1)[1]
+        fields = body.split("｜")
+        if len(fields) < 3:
+            continue
+        company = re.sub(r"[*_`]", "", fields[0]).strip()
+        role = re.sub(r"[*_`]", "", fields[1]).strip()
+        marker_id = marker_match.group("id") if marker_match else ""
+        if marker_id in _task_marker_ids(task):
+            candidates = [(
+                index,
+                line,
+                fields,
+                clean_line.split("] ", 1)[0] + "] ",
+            )]
+            break
+        if (
+            not marker_id
+            and _company_key(company) == _company_key(task.company)
+            and task.role
+            and _same_role(role, task.role)
+        ):
+            candidates.append(
+                (
+                    index,
+                    line,
+                    fields,
+                    clean_line.split("] ", 1)[0] + "] ",
+                )
+            )
+
+    if not candidates and task.event_type == "application" and task.role:
+        checked = "x" if task.status in {"confirmed", "done"} else " "
+        lines.extend(
+            [
+                "",
+                (
+                    f"- [{checked}] {task.company}｜{task.role}｜"
+                    f"**{_progress_status(task)}**｜{task.action_summary} "
+                    f"<!-- jobmaildesk:application:{_application_identity(task)} -->"
+                ),
+            ]
+        )
+        updated = prefix + marker + "\n".join(lines) + suffix
+        _atomic_write(path, updated)
+        return 1
+    if len(candidates) != 1:
+        return 0
+    index, _line, fields, _checkbox_prefix = candidates[0]
+    checked = task.status == "done" or (
+        task.event_type == "application" and task.status == "confirmed"
+    )
+    checkbox_prefix = "- [x] " if checked else "- [ ] "
+    fields[2] = f"**{_progress_status(task)}**"
+    lines[index] = (
+        f"{checkbox_prefix}{'｜'.join(fields)} "
+        f"<!-- jobmaildesk:application:{_application_identity(task)} -->"
+    )
+    updated = prefix + marker + "\n".join(lines) + suffix
+    if updated == content:
+        return 0
+    _atomic_write(path, updated)
+    return 1
+
+
+def sync_current_applications_to_ledger(
+    tasks: list[JobTask],
+    path: Path | None,
+) -> int:
+    """Sync each application once, using its current node after batch merging."""
+    grouped: dict[str, list[JobTask]] = defaultdict(list)
+    for task in tasks:
+        if task.status != "irrelevant":
+            grouped[_application_identity(task)].append(task)
+    updates = 0
+    for chain in grouped.values():
+        chain.sort(key=_event_time)
+        active = [
+            item
+            for item in chain
+            if item.status not in {"done", "cancelled", "expired", "irrelevant"}
+        ]
+        current = active[-1] if active else chain[-1]
+        updates += sync_task_to_ledger(current, path)
+    return updates
 
 
 def _ledger_entries(path: Path | None) -> list[dict[str, str]]:
@@ -95,21 +283,31 @@ def _ledger_entries(path: Path | None) -> list[dict[str, str]]:
     for line in section.splitlines():
         if not re.match(r"^- \[[ xX]\] ", line):
             continue
+        marker_match = APPLICATION_MARKER.search(line)
+        clean_line = APPLICATION_MARKER.sub("", line).rstrip()
         fields = [
             re.sub(r"[*_`]", "", item).strip()
-            for item in line.split("] ", 1)[1].split("｜")
+            for item in clean_line.split("] ", 1)[1].split("｜")
         ]
         if len(fields) < 3:
             continue
+        company, project = normalize_company_project(fields[0])
         entries.append(
             {
-                "company": fields[0],
-                "role": fields[1],
+                "company": company,
+                "role": canonical_role(fields[1]) or fields[1],
+                "project": project or "",
                 "status": fields[2],
                 "action": "｜".join(fields[3:]).strip(),
+                "application_id": marker_match.group("id") if marker_match else "",
             }
         )
     return entries
+
+
+def read_progress_entries(path: Path | None) -> list[dict[str, str]]:
+    """Return normalized user-ledger rows without modifying the source file."""
+    return [dict(entry) for entry in _ledger_entries(path)]
 
 
 def progress_payload(
@@ -120,7 +318,7 @@ def progress_payload(
     grouped: dict[str, list[JobTask]] = defaultdict(list)
     for task in tasks:
         if task.status != "irrelevant":
-            grouped[task.application_id].append(task)
+            grouped[_application_identity(task)].append(task)
 
     applications: list[dict[str, object]] = []
     for app_id, chain in grouped.items():
@@ -139,14 +337,17 @@ def progress_payload(
             ),
             current.company,
         )
-        role = next((item.role for item in reversed(chain) if item.role), None)
+        role = _best_role(chain)
         project = next(
             (item.recruiting_project for item in reversed(chain) if item.recruiting_project),
             None,
         )
+        company, project = normalize_company_project(company, project)
         applications.append(
             {
                 "application_id": app_id,
+                "application_key": current.application_key,
+                "legacy_application_id": current.application_id,
                 "company": company,
                 "role": role or "岗位待确认",
                 "project": project or "",
@@ -154,6 +355,17 @@ def progress_payload(
                 "current_round": current.round or "",
                 "current_status": current.status,
                 "status_label": _status_label(current.status),
+                "received_at": current.received_at.isoformat(),
+                "start_at": current.start_at.isoformat() if current.start_at else None,
+                "end_at": current.end_at.isoformat() if current.end_at else None,
+                "deadline_at": (
+                    current.deadline_at.isoformat() if current.deadline_at else None
+                ),
+                "completed_at": (
+                    current.completed_at.isoformat() if current.completed_at else None
+                ),
+                "completed_at_inferred": current.completed_at_inferred,
+                "current_action": current.action_summary,
                 "active": bool(active),
                 "next_time": (
                     critical_time(current).isoformat()
@@ -168,10 +380,22 @@ def progress_payload(
                         "round": item.round or "",
                         "status": item.status,
                         "status_label": _status_label(item.status),
-                        "time": critical_time(item).isoformat()
-                        if critical_time(item)
+                        "time": (
+                            item.completed_at
+                            if item.status == "done" and item.completed_at
+                            else critical_time(item)
+                        ).isoformat()
+                        if (
+                            (item.status == "done" and item.completed_at)
+                            or critical_time(item)
+                        )
                         else None,
                         "action": item.action_summary,
+                        "time_inferred": bool(
+                            item.status == "done"
+                            and item.completed_at
+                            and item.completed_at_inferred
+                        ),
                     }
                     for item in reversed(chain)
                 ],
@@ -185,19 +409,55 @@ def progress_payload(
         task_states[_company_key(task.company)].add(task.status)
     for entry in _ledger_entries(source_path):
         company_key = _company_key(entry["company"])
+
+        def same_program(application: dict[str, object]) -> bool:
+            application_text = " ".join(
+                (str(application.get("role") or ""), str(application.get("project") or ""))
+            )
+            ledger_text = " ".join((entry["role"], entry["project"]))
+            application_program = re.search(r"(?<![A-Za-z])(JDS|TET)(?![A-Za-z])", application_text, re.I)
+            ledger_program = re.search(r"(?<![A-Za-z])(JDS|TET)(?![A-Za-z])", ledger_text, re.I)
+            return bool(
+                application_program
+                and ledger_program
+                and application_program.group(1).casefold()
+                == ledger_program.group(1).casefold()
+            )
+
         task_matches = [
             application
             for application in task_applications
-            if _company_key(str(application["company"])) == company_key
+            if (
+                entry["application_id"]
+                in {
+                    application["application_id"],
+                    application.get("application_key"),
+                    application.get("legacy_application_id"),
+                }
+                or (
+                    not entry["application_id"]
+                    and _company_key(str(application["company"])) == company_key
+                    and (
+                        _same_role(str(application["role"]), entry["role"])
+                        or same_program(application)
+                    )
+                    and (
+                        not entry["project"]
+                        or entry["project"] in str(application["project"])
+                    )
+                )
+            )
         ]
         if task_matches:
             for application in task_matches:
                 application["ledger_status"] = entry["status"]
                 application["ledger_action"] = entry["action"]
+                if application["role"] == "岗位待确认" and same_program(application):
+                    application["role"] = entry["role"]
             continue
         if task_states.get(company_key) == {"irrelevant"}:
             continue
-        ledger_key = (company_key, re.sub(r"\s+", "", entry["role"]).casefold())
+        ledger_key = (company_key, _role_key(entry["role"]))
         if ledger_key in ledger_keys:
             continue
         ended = any(
@@ -212,11 +472,18 @@ def progress_payload(
                 "application_id": identifier,
                 "company": entry["company"],
                 "role": entry["role"],
-                "project": "",
+                "project": entry["project"],
                 "current_stage": entry["status"],
                 "current_round": "",
                 "current_status": "done" if ended else "tracked",
                 "status_label": entry["status"],
+                "received_at": None,
+                "start_at": None,
+                "end_at": None,
+                "deadline_at": None,
+                "completed_at": None,
+                "completed_at_inferred": False,
+                "current_action": entry["action"],
                 "active": not ended,
                 "next_time": None,
                 "updated_at": "",
@@ -287,43 +554,88 @@ def export_progress(
     ]
     if not applications:
         lines.extend(["_暂无流程记录_", ""])
+
+    def cell(value: object) -> str:
+        text = redact_text(str(value or "")).replace("|", "\\|").strip()
+        return text or "—"
+
+    def display_time(value: object, *, inferred: bool = False) -> str:
+        if not value:
+            return "—"
+        rendered = datetime.fromisoformat(str(value)).astimezone(SHANGHAI).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+        return f"约 {rendered}（历史推定）" if inferred else rendered
+
     for application in applications:
         company = redact_text(str(application["company"]))
         role = redact_text(str(application["role"]))
         project = redact_text(str(application["project"]))
-        heading = f"## {company}｜{role}"
-        if project:
-            heading += f"｜{project}"
+        summary = f"{company}｜{role} · {application['current_stage']}"
         current_round = (
-            f"｜{application['current_round']}"
+            str(application["current_round"])
             if application["current_round"]
-            else ""
+            else "—"
         )
+        next_action = redact_text(
+            str(
+                application.get("ledger_action")
+                or application.get("current_action")
+                or ""
+            )
+        )
+        if application.get("start_at") and application.get("end_at"):
+            activity_window = (
+                f"{display_time(application['start_at'])} – "
+                f"{display_time(application['end_at'])}"
+            )
+        else:
+            activity_window = display_time(application.get("start_at"))
         lines.extend(
             [
-                heading,
-                "",
+                f"> [!abstract]- {summary}",
+                f"> <!-- jobmaildesk:application:{application['application_id']} -->",
+                ">",
+                "> | 字段 | 内容 |",
+                "> | --- | --- |",
+                f"> | 企业 | {cell(company)} |",
+                f"> | 岗位 | {cell(role)} |",
+                f"> | 招聘项目 | {cell(project)} |",
+                f"> | 当前阶段 | {cell(application['current_stage'])} |",
+                f"> | 当前状态 | {cell(application['status_label'])} |",
+                f"> | 轮次 | {cell(current_round)} |",
+                f"> | 投递/收到 | {display_time(application.get('received_at'))} |",
+                f"> | 活动窗口 | {activity_window} |",
+                f"> | 截止时间 | {display_time(application.get('deadline_at'))} |",
                 (
-                    f"- 当前：**{application['current_stage']}**{current_round}"
-                    f"｜{application['status_label']}"
+                    "> | 完成时间 | "
+                    f"{display_time(application.get('completed_at'), inferred=bool(application.get('completed_at_inferred')))} |"
                 ),
-                "- 流程：",
+                f"> | 下一步 | {cell(next_action)} |",
+                ">",
+                "> **流程记录**",
             ]
         )
-        ledger_action = redact_text(str(application.get("ledger_action") or ""))
-        if ledger_action:
-            lines.insert(len(lines) - 1, f"- 下一步：{ledger_action}")
         for event in application["history"]:  # type: ignore[union-attr]
             time_label = "时间待确认"
             if event["time"]:
                 time_label = datetime.fromisoformat(str(event["time"])).astimezone(
                     SHANGHAI
                 ).strftime("%Y-%m-%d %H:%M")
+                if event.get("time_inferred"):
+                    time_label = f"约 {time_label}（历史推定）"
             round_label = f"｜{event['round']}" if event["round"] else ""
-            lines.append(
-                f"  - {time_label}｜{event['stage']}{round_label}｜{event['status_label']}"
+            checkbox = "x" if event["status"] == "done" else " "
+            task_marker = (
+                f" <!-- jobmaildesk:{event['task_id']} -->"
+                if event["task_id"]
+                else ""
             )
-        lines.append("")
+            lines.append(
+                f"> - [{checkbox}] {time_label}｜{event['stage']}"
+                f"{round_label}｜{event['status_label']}{task_marker}"
+            )
+        lines.extend([">", ""])
     lines.extend([MANAGED_END, ""])
     _atomic_write(
         output,

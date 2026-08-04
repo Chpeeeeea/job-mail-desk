@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+release-rc/
 *.spec.bak
 data/
 logs/

@@ -93,3 +93,13 @@ def test_expired_task_does_not_enter_todo_export(tmp_path) -> None:
     content = output.read_text(encoding="utf-8")
     assert item.company not in content
     assert "已过期但未完成" not in content
+
+
+def test_confirmed_application_without_time_stays_out_of_todo(tmp_path) -> None:
+    item = sample_task()
+    item.event_type = "application"
+    item.stage = "网申"
+    item.status = "confirmed"
+    output = tmp_path / "todo.md"
+    export_dashboard([item], output, Settings(), now=item.received_at)
+    assert item.company not in output.read_text(encoding="utf-8")

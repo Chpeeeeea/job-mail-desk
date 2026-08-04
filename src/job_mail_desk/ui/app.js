@@ -673,7 +673,6 @@ async function saveTask(event) {
 
 async function showSettingsDialog(firstRun = false, payload = null) {
   if (!apiReady()) return;
-  await window.pywebview.api.set_editor_mode(true);
   const settings = payload || await window.pywebview.api.get_app_settings();
   state.settingsFirstRun = firstRun || !settings.credential_configured;
   document.querySelector("#settingsTitle").textContent = state.settingsFirstRun
@@ -697,8 +696,10 @@ async function showSettingsDialog(firstRun = false, payload = null) {
   settingsForm.elements.progress_source.value = settings.progress_source || "";
   settingsForm.elements.updates_enabled.checked = Boolean(settings.updates_enabled);
   settingsForm.elements.update_channel.value = settings.update_channel || "preview";
+  settingsForm.elements.dictionary_workbook.value = "";
   document.querySelector("#currentVersion").textContent = `v${settings.app_version}`;
   renderUpdateStatus(await window.pywebview.api.get_update_status());
+  renderDictionaryStatus(await window.pywebview.api.get_dictionary_status());
   if (!settingsDialog.open) settingsDialog.showModal();
 }
 
@@ -768,6 +769,49 @@ async function checkForUpdates() {
 }
 
 window.checkForUpdates = checkForUpdates;
+
+function renderDictionaryStatus(payload) {
+  const counts = payload.counts || {};
+  const badge = document.querySelector("#dictionaryBadge");
+  const status = document.querySelector("#dictionaryStatus");
+  badge.textContent = `${counts.companies || 0} 家企业`;
+  const source = payload.user_dictionary_enabled
+    ? `个人词典已启用${payload.source_filename ? ` · ${payload.source_filename}` : ""}`
+    : "当前使用内置基础词典";
+  status.textContent = `${source} · ${counts.programs || 0} 个项目 · ${counts.roles || 0} 个岗位`;
+}
+
+async function selectDictionaryWorkbook() {
+  if (!apiReady()) return;
+  const selected = await window.pywebview.api.select_dictionary_workbook();
+  if (selected) settingsForm.elements.dictionary_workbook.value = selected;
+}
+
+async function compileDictionaryWorkbook() {
+  if (!apiReady()) return;
+  const source = settingsForm.elements.dictionary_workbook.value.trim();
+  const sheet = settingsForm.elements.dictionary_sheet.value.trim();
+  const status = document.querySelector("#dictionaryStatus");
+  if (!source) {
+    status.textContent = "请先选择一个 .xlsx 秋招表。";
+    status.classList.add("error");
+    return;
+  }
+  status.classList.remove("error", "success");
+  status.textContent = "正在本机编译词典…";
+  try {
+    const result = await window.pywebview.api.compile_dictionary_workbook(source, sheet);
+    renderDictionaryStatus({
+      counts: result.counts,
+      user_dictionary_enabled: true,
+      source_filename: source.split(/[\\/]/).pop(),
+    });
+    status.classList.add("success");
+  } catch (error) {
+    status.textContent = error?.message || String(error);
+    status.classList.add("error");
+  }
+}
 
 async function saveAppSettings(event) {
   event.preventDefault();
@@ -878,7 +922,25 @@ document.querySelectorAll(".tab").forEach((tab) => {
   });
 });
 
-document.querySelector("#refreshButton").addEventListener("click", refresh);
+async function scanMailbox(button, idleText) {
+  if (!apiReady() || button.disabled) return;
+  button.disabled = true;
+  button.textContent = "…";
+  try {
+    const result = await window.pywebview.api.trigger_scan();
+    if (result?.status === "busy") {
+      healthText.textContent = "邮箱扫描正在进行，请稍候";
+    }
+    await refresh();
+  } finally {
+    button.disabled = false;
+    button.textContent = idleText;
+  }
+}
+
+document.querySelector("#refreshButton").addEventListener("click", (event) => {
+  scanMailbox(event.currentTarget, "扫描邮箱");
+});
 document.querySelector("#addButton").addEventListener("click", () => showTaskDialog());
 document.querySelector("#settingsButton").addEventListener("click", () => showSettingsDialog(false));
 document.querySelector("#updateBanner").addEventListener("click", () => showSettingsDialog(false));
@@ -897,7 +959,8 @@ settingsDialog.addEventListener("cancel", (event) => {
   if (state.settingsFirstRun) event.preventDefault();
 });
 settingsDialog.addEventListener("close", () => {
-  if (apiReady()) window.pywebview.api.set_editor_mode(false);
+  // Settings is intentionally scrollable inside the normal card geometry.
+  // Resizing the native window here caused a large intermediate flash.
 });
 document.querySelectorAll("[data-pick-path]").forEach((button) => {
   button.addEventListener("click", () => pickSettingsPath(button.dataset.pickPath));
@@ -906,6 +969,14 @@ document.querySelector("#createProgressTemplate").addEventListener(
   "click",
   createProgressTemplateFromSettings,
 );
+document.querySelector("#selectDictionaryWorkbook").addEventListener(
+  "click",
+  selectDictionaryWorkbook,
+);
+document.querySelector("#compileDictionaryWorkbook").addEventListener(
+  "click",
+  compileDictionaryWorkbook,
+);
 document.querySelector("#testMailSettings").addEventListener("click", testMailSettings);
 document.querySelector("#checkUpdates").addEventListener("click", checkForUpdates);
 document.querySelector("#openUpdateRelease").addEventListener("click", () => {
@@ -913,16 +984,7 @@ document.querySelector("#openUpdateRelease").addEventListener("click", () => {
 });
 document.querySelector("#scanButton").addEventListener("click", async () => {
   const button = document.querySelector("#scanButton");
-  if (!apiReady() || button.disabled) return;
-  button.disabled = true;
-  button.textContent = "…";
-  try {
-    await window.pywebview.api.trigger_scan();
-    await refresh();
-  } finally {
-    button.disabled = false;
-    button.textContent = "↻";
-  }
+  await scanMailbox(button, "↻");
 });
 
 window.addEventListener("pywebviewready", initializeApp);

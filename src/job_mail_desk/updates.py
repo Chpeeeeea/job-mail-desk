@@ -20,7 +20,21 @@ RELEASES_PAGE = f"https://github.com/{REPOSITORY}/releases"
 UPDATE_ROOT = LOCAL_ROOT / "updates"
 UPDATE_STATE = UPDATE_ROOT / "state.json"
 CHECK_INTERVAL = timedelta(hours=24)
-VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+VERSION_PATTERN = re.compile(
+    r"^v?(\d+)\.(\d+)\.(\d+)"
+    r"(?:(?:[.-]?)(dev|alpha|a|beta|b|rc)[.-]?(\d+)?)?"
+    r"(?:\+[0-9A-Za-z.-]+)?$",
+    re.IGNORECASE,
+)
+PHASE_RANK = {
+    "dev": 0,
+    "alpha": 1,
+    "a": 1,
+    "beta": 2,
+    "b": 2,
+    "rc": 3,
+    "final": 4,
+}
 
 
 class UpdateError(RuntimeError):
@@ -51,11 +65,23 @@ class UpdateDescriptor:
         }
 
 
-def parse_version(value: str) -> tuple[int, int, int]:
+def parse_version(value: str) -> tuple[int, int, int, int, int]:
     match = VERSION_PATTERN.fullmatch(value.strip())
     if not match:
         raise ValueError(f"不支持的版本号：{value}")
-    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+    major, minor, patch, phase, phase_number = match.groups()
+    normalized_phase = (phase or "final").lower()
+    return (
+        int(major),
+        int(minor),
+        int(patch),
+        PHASE_RANK[normalized_phase],
+        int(phase_number or 0),
+    )
+
+
+def _version_label(value: str) -> str:
+    return value.strip().removeprefix("v").removeprefix("V")
 
 
 def release_platform(
@@ -108,7 +134,7 @@ def find_update(
     current = parse_version(current_version)
     target_platform = platform_name or release_platform()
     candidates = releases if releases is not None else _request_json(RELEASES_API)
-    ranked: list[tuple[tuple[int, int, int], dict[str, object]]] = []
+    ranked: list[tuple[tuple[int, int, int, int, int], str, dict[str, object]]] = []
     for release in candidates:
         if release.get("draft"):
             continue
@@ -120,9 +146,12 @@ def find_update(
         except ValueError:
             continue
         if version > current:
-            ranked.append((version, release))
-    for version_tuple, release in sorted(ranked, key=lambda item: item[0], reverse=True):
-        version = ".".join(str(part) for part in version_tuple)
+            ranked.append((version, _version_label(tag), release))
+    for _version_tuple, version, release in sorted(
+        ranked,
+        key=lambda item: item[0],
+        reverse=True,
+    ):
         archive_name = f"JobMailDesk-Core-v{version}-{target_platform}.zip"
         checksum_name = f"{archive_name}.sha256"
         asset_names = {

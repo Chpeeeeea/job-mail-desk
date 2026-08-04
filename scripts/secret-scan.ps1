@@ -10,12 +10,14 @@ $patterns = [ordered]@{
     "Personal Windows path" = '(?i)C:\\Users\\(?!<当前用户>|<user>|username)[^\\\s]+'
     "Credential literal" = '(?i)(authorization_code|password|passwd|secret|api_key)\s*[:=]\s*["''][^"'']{8,}["'']'
     "Private URL token" = '(?i)https?://[^\s"'']+[?&](token|auth|code|session|ticket|key)=[^&\s"'']{8,}'
-    "Standalone long number" = '(?<![A-Za-z0-9_])\d{10,}(?![A-Za-z0-9_])'
+    "Standalone long number" = '(?<!local-role-)(?<!local-company-)(?<!local-program-)(?<![A-Za-z0-9_])\d{10,}(?![A-Za-z0-9_])'
 }
 
 Push-Location $projectRoot
 try {
-    $tracked = git ls-files 2>$null
+    # Include staged/tracked files and new release candidates. Scanning only
+    # tracked files would miss secrets in files added by the current release.
+    $tracked = git ls-files --cached --others --exclude-standard 2>$null
     if (-not $tracked) {
         $tracked = Get-ChildItem -Recurse -File |
             Where-Object {
@@ -35,7 +37,8 @@ try {
                 if (
                     $match.Value -match '@example\.invalid' -or
                     $match.Value -eq 'token=secret' -or
-                    $match.Value -eq '13800138000'
+                    $match.Value -eq '13800138000' -or
+                    $match.Value -match '^(.)\1{9,}$'
                 ) {
                     continue
                 }

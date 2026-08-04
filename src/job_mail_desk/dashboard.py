@@ -14,7 +14,7 @@ from .state import StateStore
 from .task_service import critical_time
 
 
-DASHBOARD_CACHE_SCHEMA = 2
+DASHBOARD_CACHE_SCHEMA = 3
 
 
 def _view(task: JobTask, now: datetime) -> str:
@@ -69,6 +69,7 @@ def _task_payload(
     return {
         "id": task.id,
         "application_id": task.application_id,
+        "application_key": task.application_key,
         "company": task.company,
         "role": task.role or "岗位待确认",
         "event_type": task.event_type,
@@ -80,6 +81,8 @@ def _task_payload(
         "start_at": task.start_at.isoformat() if task.start_at else None,
         "end_at": task.end_at.isoformat() if task.end_at else None,
         "deadline_at": task.deadline_at.isoformat() if task.deadline_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "completed_at_inferred": task.completed_at_inferred,
         "snoozed_until": (
             task.snoozed_until.isoformat() if task.snoozed_until else None
         ),

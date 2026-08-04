@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import ctypes
+import json
 import sys
 import threading
 import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Callable
 from urllib.parse import quote
 
@@ -39,6 +41,8 @@ from . import __version__
 from .config import (
     CONFIG_PATH,
     DASHBOARD_FILE,
+    DICTIONARIES_DIR,
+    IMPORTED_DICTIONARIES_DIR,
     STATE_DB,
     TASKS_DIR,
     Settings,
@@ -47,6 +51,8 @@ from .config import (
 )
 from .agent_bridge import apply_task_update, sync_outputs
 from .credentials import MailCredential, load_credential, save_credential
+from .dictionary_compiler import compile_workbook
+from .identity_dictionaries import load_identity_dictionaries
 from .mail_reader import ImapReader
 from .dashboard import cached_dashboard_payload
 from .markdown_store import MarkdownTaskStore
@@ -220,6 +226,7 @@ class DesktopApi:
         self._editor_geometry: tuple[int, int, int, int] | None = None
         self._dashboard_lock = threading.Lock()
         self._updates = UpdateManager()
+        MarkdownTaskStore(TASKS_DIR).backfill_completed_times()
 
     def get_dashboard(self) -> dict[str, object]:
         with self._dashboard_lock:
@@ -355,6 +362,72 @@ class DesktopApi:
             raise ValueError("请选择一个 .md 进展台账路径。")
         created = create_progress_template(path)
         return {"created": created, "path": str(path)}
+
+    def get_dictionary_status(self) -> dict[str, object]:
+        dictionaries = load_identity_dictionaries(DICTIONARIES_DIR)
+        report_path = IMPORTED_DICTIONARIES_DIR / "compilation-report.json"
+        report: dict[str, object] = {}
+        if report_path.exists():
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                report = {}
+        return {
+            "counts": dictionaries.counts(),
+            "user_dictionary_enabled": any(
+                (IMPORTED_DICTIONARIES_DIR / name).exists()
+                for name in ("companies.yml", "programs.yml", "roles.yml")
+            ),
+            "source_filename": report.get("source_filename"),
+            "compiled_at": report.get("compiled_at"),
+            "directory": str(IMPORTED_DICTIONARIES_DIR),
+        }
+
+    def select_dictionary_workbook(self) -> str:
+        if not self._window:
+            return ""
+        selected = self._window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            allow_multiple=False,
+            file_types=("Excel 工作簿 (*.xlsx)",),
+        )
+        return str(selected[0]) if selected else ""
+
+    def compile_dictionary_workbook(
+        self,
+        path_value: str,
+        sheet_name: str = "2027秋招信息表",
+    ) -> dict[str, object]:
+        source = Path(path_value.strip())
+        if not source.is_file() or source.suffix.lower() != ".xlsx":
+            raise ValueError("请选择有效的 .xlsx 秋招表。")
+        DICTIONARIES_DIR.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(
+            prefix="dictionary-staging-",
+            dir=DICTIONARIES_DIR,
+        ) as temporary:
+            staging = Path(temporary)
+            report = compile_workbook(
+                source,
+                staging,
+                load_identity_dictionaries(),
+                sheet_name=sheet_name.strip() or "2027秋招信息表",
+            )
+            validated = load_identity_dictionaries(staging)
+            IMPORTED_DICTIONARIES_DIR.mkdir(parents=True, exist_ok=True)
+            for name in (
+                "companies.yml",
+                "programs.yml",
+                "roles.yml",
+                "compilation-report.json",
+            ):
+                os.replace(staging / name, IMPORTED_DICTIONARIES_DIR / name)
+        return {
+            "ok": True,
+            "compiled": report,
+            "counts": validated.counts(),
+            "directory": str(IMPORTED_DICTIONARIES_DIR),
+        }
 
     def update_status(self, task_id: str, status: str) -> dict[str, object]:
         store = MarkdownTaskStore(TASKS_DIR)

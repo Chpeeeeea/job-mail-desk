@@ -11,7 +11,7 @@ from .privacy import redact_text
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-PARSER_VERSION = "2026.08.03.3"
+PARSER_VERSION = "2026.08.03.10"
 URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 RECRUITING_KEYWORDS = (
     "笔试",
@@ -32,6 +32,8 @@ RECRUITING_KEYWORDS = (
     "未通过",
     "感谢投递",
     "感谢您投递",
+    "收到你的申请",
+    "收到您的申请",
     "完善简历",
 )
 STAGES = (
@@ -67,7 +69,8 @@ CN_DATETIME = re.compile(
     r"[^\d]{0,12}(?P<h>[01]?\d|2[0-3]|24)\s*点(?:\s*(?P<min>[0-5]?\d)\s*分)?"
 )
 RELATIVE_DEADLINE = re.compile(
-    r"(?:收到(?:本)?邮件(?:后)?(?:的)?|收到(?:本)?通知(?:后)?|请在|须在|务必在)"
+    r"(?:收到(?:本)?邮件(?:后)?(?:的)?|收到(?:本)?通知(?:后)?|"
+    r"请在|须在|务必在|建议(?:您|你)?在)"
     r"[^。；;]{0,16}?"
     r"(?P<amount>\d{1,3})\s*(?P<unit>小时|天)(?:内|之内)"
 )
@@ -77,8 +80,10 @@ DURATION = re.compile(
 )
 ROLE_PATTERNS = (
     re.compile(r"(?:邀请您参加|邀请你参加)\s*([^，。\n]{2,60}?)\s*岗位"),
+    re.compile(r"(?:您|你)投递的\s*([^，。\n]{2,60}?)\s*职位"),
     re.compile(r"感谢您投递[^\n，。]{2,120}[）)]([^，。]{2,40})，现邀请"),
     re.compile(r"(?:面试职位|应聘职位|职位名称|应聘岗位|岗位名称)\s*[:：]\s*([^\n。；]{2,60})"),
+    re.compile(r"意向岗位\s*[:：]\s*([^\n。；]{2,60})"),
     re.compile(r"(?:岗位|职位)\s*[:：]\s*([^\n。；]{2,60})"),
 )
 
@@ -228,7 +233,8 @@ def _stage(subject: str, body: str) -> str:
     ):
         return "未通过"
     if re.search(
-        r"(?:简历)?投递成功|简历(?:已经|已)收到|内推成功确认|网申成功",
+        r"(?:简历)?投递成功|简历(?:已经|已)收到|内推成功确认|网申成功|"
+        r"(?:我们)?已收到(?:您|你)的申请",
         f"{subject} {body}",
     ):
         return "网申"
@@ -343,9 +349,33 @@ def _project(text: str) -> str | None:
         business_unit = "雷火事业群"
     elif re.search(r"(?:网易游戏)?互娱(?:事业群|校招)?", text):
         business_unit = "互娱事业群"
+    # Mail footers often list all JD programmes (JDS/TET/TGT). The first
+    # programme mention belongs to the subject/main content; later mentions
+    # are explanatory noise and must not relabel a TET task as JDS.
+    jd_program_match = re.search(
+        r"(?<![A-Za-z])(?P<program>JDS|TET)(?![A-Za-z])",
+        text,
+        re.IGNORECASE,
+    )
+    jd_program = jd_program_match.group("program").upper() if jd_program_match else None
+    if jd_program and not cycle:
+        jd_year = re.search(
+            rf"(?P<year>20\d{{2}})\s*{jd_program}",
+            text,
+            re.IGNORECASE,
+        )
+        if jd_year:
+            cycle = f"{jd_year.group('year')}校园招聘"
+    if jd_program == "JDS" and cycle:
+        return f"JDS · {cycle}"
+    if jd_program == "JDS":
+        return "JDS"
     if business_unit and cycle:
         return f"{business_unit} · {cycle}"
-    return business_unit or cycle
+    project = business_unit or cycle
+    if project and "提前批" in text:
+        return f"{project} · 提前批"
+    return project
 
 
 def _round(text: str) -> str | None:
@@ -428,13 +458,14 @@ def parse_record(record: MailRecord) -> ParsedEvent | None:
         action = f"参加{identity}群面；提前准备并核对会议入口。"
     else:
         action = requirements[0] if requirements else redact_text(subject)
+    event_type = _event_type(stage)
     return ParsedEvent(
         company=company,
         role=role,
         recruiting_project=project,
-        event_type=_event_type(stage),
+        event_type=event_type,
         stage=stage,
-        round=_round(combined),
+        round=None if event_type == "application" else _round(combined),
         title=redact_text(subject),
         start_at=start,
         end_at=end,

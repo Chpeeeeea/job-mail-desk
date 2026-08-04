@@ -7,6 +7,12 @@ from datetime import datetime, timedelta
 
 from .markdown_store import MarkdownTaskStore
 from .models import JobTask, ParsedEvent
+from .normalization import (
+    canonical_role,
+    is_invalid_role,
+    normalize_company_project,
+    roles_equivalent,
+)
 from .parser import SHANGHAI
 from .privacy import redact_text
 
@@ -19,10 +25,22 @@ def message_hash(message_id: str) -> str:
     return _slug_hash(message_id, 32)
 
 
+def legacy_application_id(application_key: str) -> str:
+    """Return the stable legacy-compatible ID for a canonical application key."""
+    return _slug_hash(f"application-key|{application_key}", 20)
+
+
 def application_id(event: ParsedEvent) -> str:
-    company = event.company or "unknown-company"
-    role = event.role or "unknown-role"
-    project = event.recruiting_project or "unknown-cycle"
+    company, project_value = normalize_company_project(
+        event.company or "unknown-company",
+        event.recruiting_project,
+    )
+    if _project_scope(project_value, event.role) == "jd-jds":
+        year = re.search(r"20\d{2}", project_value or "")
+        cycle = year.group(0) if year else "current"
+        return _slug_hash(f"{company}|jd-jds|{cycle}", 20)
+    role = canonical_role(event.role) or "unknown-role"
+    project = project_value or "unknown-cycle"
     return _slug_hash(f"{company}|{role}|{project}", 20)
 
 
@@ -33,16 +51,21 @@ def task_id(event: ParsedEvent, app_id: str | None = None) -> str:
 
 
 def _compatible(value: str | None, existing: str | None) -> bool:
-    return not value or not existing or value == existing
+    return roles_equivalent(value, existing)
 
 
-def _project_scope(value: str | None) -> str | None:
-    if not value:
+def _project_scope(value: str | None, role: str | None = None) -> str | None:
+    combined = " ".join(item for item in (value, role) if item)
+    if not combined:
         return None
-    if "雷火事业群" in value:
+    if "雷火事业群" in combined:
         return "netease-leihuo"
-    if "互娱事业群" in value:
+    if "互娱事业群" in combined:
         return "netease-interactive"
+    if re.search(r"(?<![A-Za-z])JDS(?![A-Za-z])", combined, re.IGNORECASE):
+        return "jd-jds"
+    if re.search(r"(?<![A-Za-z])TET(?![A-Za-z])", combined, re.IGNORECASE):
+        return "jd-tet"
     return None
 
 
@@ -54,6 +77,14 @@ def _compatible_project(value: str | None, existing: str | None) -> bool:
     if value_scope or existing_scope:
         return value_scope == existing_scope
     return value == existing
+
+
+def _compatible_application_scope(event: ParsedEvent, task: JobTask) -> bool:
+    incoming_scope = _project_scope(event.recruiting_project, event.role)
+    existing_scope = _project_scope(task.recruiting_project, task.role)
+    if incoming_scope or existing_scope:
+        return incoming_scope == existing_scope
+    return _compatible_project(event.recruiting_project, task.recruiting_project)
 
 
 def _merge_project(existing: str | None, incoming: str | None) -> str | None:
@@ -82,9 +113,13 @@ def _resolve_application_id(
     candidates = [
         task
         for task in store.all()
-        if task.company == (event.company or "公司待确认")
+        if normalize_company_project(task.company, task.recruiting_project)[0]
+        == normalize_company_project(
+            event.company or "公司待确认",
+            event.recruiting_project,
+        )[0]
         and _compatible(event.role, task.role)
-        and _compatible_project(event.recruiting_project, task.recruiting_project)
+        and _compatible_application_scope(event, task)
     ]
     if not candidates:
         return application_id(event)
@@ -92,7 +127,7 @@ def _resolve_application_id(
         scopes = {
             scope
             for task in candidates
-            if (scope := _project_scope(task.recruiting_project))
+            if (scope := _project_scope(task.recruiting_project, task.role))
         }
         if len(scopes) > 1:
             return application_id(event)
@@ -128,15 +163,35 @@ def _priority(event: ParsedEvent, now: datetime) -> str:
     return "normal"
 
 
-def _merge(existing: JobTask, event: ParsedEvent, now: datetime) -> JobTask:
+def _merge(
+    existing: JobTask,
+    event: ParsedEvent,
+    now: datetime,
+    *,
+    same_source: bool = False,
+) -> JobTask:
     previous_event_type = existing.event_type
-    existing.company = event.company or existing.company
-    existing.role = event.role or existing.role
-    existing.recruiting_project = _merge_project(
-        existing.recruiting_project,
+    normalized_company, normalized_project = normalize_company_project(
+        event.company or existing.company,
         event.recruiting_project,
     )
-    existing.received_at = max(existing.received_at, event.source_received_at)
+    existing.company = normalized_company
+    incoming_role = canonical_role(event.role)
+    if incoming_role:
+        existing.role = incoming_role
+    elif is_invalid_role(existing.role):
+        existing.role = None
+    existing.recruiting_project = _merge_project(
+        existing.recruiting_project,
+        normalized_project,
+    )
+    if _project_scope(normalized_project, incoming_role) == "jd-jds":
+        existing.application_id = application_id(event)
+    existing.received_at = (
+        event.source_received_at
+        if same_source
+        else max(existing.received_at, event.source_received_at)
+    )
     existing.event_type = event.event_type
     existing.stage = event.stage
     existing.round = event.round or existing.round
@@ -170,11 +225,80 @@ def _merge(existing: JobTask, event: ParsedEvent, now: datetime) -> JobTask:
     return existing
 
 
+def reconcile_recent_jds_receipts(
+    store: MarkdownTaskStore,
+    *,
+    window: timedelta = timedelta(hours=2),
+) -> int:
+    """Attach a generic JD application receipt to its unique nearby JDS flow."""
+    tasks = store.all()
+    changed = 0
+
+    for task in tasks:
+        if _project_scope(task.recruiting_project, task.role) != "jd-jds":
+            continue
+        year = re.search(r"20\d{2}", task.recruiting_project or "")
+        cycle = year.group(0) if year else "current"
+        canonical_id = _slug_hash(f"{task.company}|jd-jds|{cycle}", 20)
+        if task.application_id != canonical_id:
+            task.application_id = canonical_id
+            store.save(task)
+            changed += 1
+
+    tasks = store.all()
+    jds_tasks = [
+        task
+        for task in tasks
+        if _project_scope(task.recruiting_project, task.role) == "jd-jds"
+    ]
+    for receipt in tasks:
+        if not (
+            receipt.event_type == "application"
+            and not receipt.role
+            and not receipt.recruiting_project
+        ):
+            continue
+        candidates = [
+            task
+            for task in jds_tasks
+            if task.company == receipt.company
+            and timedelta(0) <= task.received_at - receipt.received_at <= window
+        ]
+        application_ids = {task.application_id for task in candidates}
+        if len(application_ids) != 1:
+            continue
+        target = min(candidates, key=lambda task: task.received_at)
+        receipt.application_id = target.application_id
+        receipt.recruiting_project = target.recruiting_project
+        store.save(receipt)
+        changed += 1
+    return changed
+
+
+def _same_occurrence(existing: JobTask, event: ParsedEvent) -> bool:
+    """Return true only when a new message describes the same dated event."""
+    if existing.event_type != event.event_type or existing.stage != event.stage:
+        return False
+    if (existing.round or "") != (event.round or ""):
+        return False
+    existing_times = (existing.start_at, existing.end_at, existing.deadline_at)
+    incoming_times = (event.start_at, event.end_at, event.deadline_at)
+    return any(incoming_times) and existing_times == incoming_times
+
+
+def _instance_task_id(event: ParsedEvent, app_id: str) -> str:
+    source = message_hash(event.source_message_id)
+    base = task_id(event, app_id)
+    return _slug_hash(f"{base}|{source}", 24)
+
+
 def task_from_event(
     event: ParsedEvent,
     store: MarkdownTaskStore,
     *,
     now: datetime | None = None,
+    application_key: str | None = None,
+    resolved_application_id: str | None = None,
 ) -> JobTask:
     current = (now or datetime.now(SHANGHAI)).astimezone(SHANGHAI)
     source_hash = message_hash(event.source_message_id)
@@ -187,13 +311,42 @@ def task_from_event(
         None,
     )
     if source_match:
-        return _merge(source_match, event, current)
-    resolved_application_id = _resolve_application_id(event, store)
+        merged = _merge(source_match, event, current, same_source=True)
+        if application_key:
+            merged.application_key = application_key
+            merged.application_id = resolved_application_id or legacy_application_id(
+                application_key
+            )
+        return merged
+    resolved_application_id = resolved_application_id or (
+        legacy_application_id(application_key)
+        if application_key
+        else _resolve_application_id(event, store)
+    )
     identifier = task_id(event, resolved_application_id)
     existing = store.load(identifier)
     if existing:
-        return _merge(existing, event, current)
-    company = redact_text(event.company or "公司待确认")
+        if event.change_type in {"update", "cancel"} or _same_occurrence(existing, event):
+            merged = _merge(existing, event, current)
+            if application_key:
+                merged.application_key = application_key
+                merged.application_id = resolved_application_id
+            return merged
+        # A different Message-ID can represent a genuinely new event at the
+        # same stage. Do not let it inherit an old task's done/completed state.
+        identifier = _instance_task_id(event, resolved_application_id)
+        same_source_instance = store.load(identifier)
+        if same_source_instance:
+            merged = _merge(same_source_instance, event, current)
+            if application_key:
+                merged.application_key = application_key
+                merged.application_id = resolved_application_id
+            return merged
+    normalized_company, normalized_project = normalize_company_project(
+        event.company or "公司待确认",
+        event.recruiting_project,
+    )
+    company = redact_text(normalized_company)
     if event.change_type == "cancel":
         status = "cancelled"
     elif event.event_type == "rejection":
@@ -211,8 +364,8 @@ def task_from_event(
         id=identifier,
         application_id=resolved_application_id,
         company=company,
-        role=event.role,
-        recruiting_project=event.recruiting_project,
+        role=canonical_role(event.role),
+        recruiting_project=normalized_project,
         event_type=event.event_type,
         stage=event.stage,
         round=event.round,
@@ -228,6 +381,7 @@ def task_from_event(
         confidence=event.confidence,
         title=title,
         action_summary=event.action_summary,
+        application_key=application_key,
         requirements=list(event.requirements),
         source_sender=event.source_sender,
         source_url=event.source_url,

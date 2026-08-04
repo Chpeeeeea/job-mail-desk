@@ -27,6 +27,9 @@ jobs:
         run: |
           $version = uv run python -c "from job_mail_desk import __version__; print(__version__)"
           "version=$version" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version v$version"
+          }
       - run: uv run pytest
       - shell: pwsh
         run: ./scripts/secret-scan.ps1
@@ -60,7 +63,13 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --group dev
       - id: version
-        run: echo "version=$(uv run python -c 'from job_mail_desk import __version__; print(__version__)')" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(uv run python -c 'from job_mail_desk import __version__; print(__version__)')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version v$version" >&2
+            exit 1
+          fi
       - run: uv run pytest
       - name: Build macOS app
         working-directory: packaging/macos
@@ -104,8 +113,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes="docs/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
+          acceptance="docs/ACCEPTANCE_${GITHUB_REF_NAME}.md"
           test -f "$notes"
+          test -f "$acceptance"
           test "$(find release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 6
+          version="${GITHUB_REF_NAME#v}"
+          for platform in win-x64 macos-arm64 macos-x64; do
+            archive="release/JobMailDesk-Core-v${version}-${platform}.zip"
+            checksum="${archive}.sha256"
+            test -f "$archive"
+            test -f "$checksum"
+            expected="$(awk '{print $1}' "$checksum")"
+            actual="$(sha256sum "$archive" | awk '{print $1}')"
+            test "$expected" = "$actual"
+          done
           gh release create "$GITHUB_REF_NAME" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "JobMailDesk Core $GITHUB_REF_NAME" \

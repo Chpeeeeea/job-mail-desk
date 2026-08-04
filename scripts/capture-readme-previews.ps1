@@ -22,14 +22,32 @@ New-Item -ItemType Directory -Force -Path $outputRoot, $tempRoot | Out-Null
 Copy-Item -LiteralPath (Join-Path $uiRoot "style.css") -Destination $tempRoot -Force
 Copy-Item -LiteralPath (Join-Path $uiRoot "app.js") -Destination $tempRoot -Force
 
-$demoJson = Get-Content -LiteralPath (Join-Path $outputRoot "readme-demo.json") -Raw -Encoding UTF8
+$demoJson = Get-Content -LiteralPath (Join-Path $repoRoot "docs\assets\readme-demo.json") -Raw -Encoding UTF8
 $mockApi = @"
     <script>
       const demoPayload = $demoJson;
       const cloneDemo = () => JSON.parse(JSON.stringify(demoPayload));
       window.pywebview = { api: {
         get_dashboard: async () => cloneDemo(),
-        get_app_settings: async () => ({ credential_configured: true, updates_enabled: false }),
+        get_app_settings: async () => ({
+          credential_configured: true,
+          email: "demo@example.com",
+          poll_minutes: 10,
+          lookback_days: 3,
+          obsidian_enabled: true,
+          obsidian_output: "D:\\Obsidian\\job-tasks.md",
+          progress_enabled: true,
+          progress_output: "D:\\Obsidian\\job-progress.md",
+          progress_source: "D:\\Obsidian\\application-ledger.md",
+          updates_enabled: false,
+          update_channel: "preview",
+          app_version: "0.5.0"
+        }),
+        get_dictionary_status: async () => ({
+          counts: { companies: 520, programs: 129, roles: 2825, mail_templates: 4 },
+          user_dictionary_enabled: false
+        }),
+        get_update_status: async () => ({ state: "idle", current_version: "0.5.0" }),
         maybe_check_for_updates: async () => null,
         set_editor_mode: async () => null,
         set_capsule: async () => null,
@@ -52,6 +70,9 @@ $viewScript = @'
         if (requested === "progress") {
           setTimeout(() => document.querySelector(".progress-overview button")?.click(), 120);
         }
+        if (requested === "settings") {
+          setTimeout(() => window.openSettingsDialog?.(false), 120);
+        }
       }, 900);
     </script>
 '@
@@ -71,6 +92,7 @@ $captures = @(
   @{ View = "review"; File = "jobmaildesk-review.png"; Height = 620 },
   @{ View = "week"; File = "jobmaildesk-week.png"; Height = 760 },
   @{ View = "month"; File = "jobmaildesk-calendar.png"; Height = 760 }
+  @{ View = "settings"; File = "jobmaildesk-settings.png"; Height = 1080 }
 )
 
 foreach ($capture in $captures) {

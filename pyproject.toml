@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "job-mail-desk"
-version = "0.4.3.dev1"
+version = "0.5.0"
 description = "Privacy-first, Markdown-native job email desk."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -37,4 +37,9 @@ addopts = "-q"
 where = ["src"]
 
 [tool.setuptools.package-data]
-job_mail_desk = ["ui/*.html", "ui/*.css", "ui/*.js"]
+job_mail_desk = [
+  "ui/*.html",
+  "ui/*.css",
+  "ui/*.js",
+  "identity_data/*.yml",
+]

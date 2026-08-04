@@ -13,6 +13,9 @@ if (-not $Version) {
     if ($LASTEXITCODE -ne 0 -or -not $Version) { throw "Unable to determine package version" }
 }
 $acceptancePath = Join-Path $projectRoot "docs\ACCEPTANCE_v$Version.md"
+if (-not (Test-Path -LiteralPath $acceptancePath -PathType Leaf)) {
+    throw "Acceptance record not found: $acceptancePath"
+}
 $resolvedExe = [System.IO.Path]::GetFullPath($ExePath)
 if (-not (Test-Path -LiteralPath $resolvedExe -PathType Leaf)) {
     throw "JobMailDesk.exe not found: $resolvedExe"
@@ -38,10 +41,7 @@ try {
     # decode UTF-8-without-BOM source files using the active ANSI code page.
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\CORE_QUICKSTART.md") -Destination (Join-Path $packageRoot "QUICKSTART.zh-CN.md")
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\DEPENDENCIES.md") -Destination (Join-Path $packageRoot "DEPENDENCIES.zh-CN.md")
-    if (Test-Path -LiteralPath $acceptancePath) {
-        Copy-Item -LiteralPath $acceptancePath -Destination (Join-Path $packageRoot "ACCEPTANCE.zh-CN.md")
-    }
-    Copy-Item -LiteralPath (Join-Path $projectRoot "CHANGELOG.md") -Destination $packageRoot
+    Copy-Item -LiteralPath $acceptancePath -Destination (Join-Path $packageRoot "ACCEPTANCE.zh-CN.md")
     Copy-Item -LiteralPath (Join-Path $projectRoot "PRIVACY.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $projectRoot "LICENSE.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\LICENSING.md") -Destination (Join-Path $packageRoot "LICENSING.zh-CN.md")

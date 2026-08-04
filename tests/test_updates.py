@@ -44,7 +44,10 @@ def _release(version: str, *, prerelease: bool = True) -> dict[str, object]:
 
 
 def test_version_and_platform_selection() -> None:
-    assert parse_version("v0.4.1") == (0, 4, 1)
+    assert parse_version("v0.4.1") == (0, 4, 1, 4, 0)
+    assert parse_version("0.5.0.dev1") < parse_version("0.5.0")
+    assert parse_version("v0.5.0-rc.2") < parse_version("0.5.0")
+    assert parse_version("v0.5.0-beta.2") < parse_version("v0.5.0-rc.1")
     assert release_platform("Windows", "AMD64") == "win-x64"
     assert release_platform("Darwin", "arm64") == "macos-arm64"
     assert release_platform("Darwin", "x86_64") == "macos-x64"
@@ -74,6 +77,20 @@ def test_preview_and_stable_channels_are_separate() -> None:
         releases=releases,
         platform_name="win-x64",
     ) is None
+
+
+def test_preview_build_can_see_newer_preview_or_final_release() -> None:
+    releases = [
+        _release("0.5.0", prerelease=False),
+        _release("0.5.0.dev2", prerelease=True),
+    ]
+    update = find_update(
+        current_version="0.5.0.dev1",
+        channel="preview",
+        releases=releases,
+        platform_name="win-x64",
+    )
+    assert update and update.version == "0.5.0"
 
 
 def test_release_asset_must_come_from_project_repository() -> None:
