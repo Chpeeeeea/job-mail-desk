@@ -20,10 +20,10 @@
 - [x] `git diff --check`：通过。
 - [x] Windows x64 self-contained EXE：本地构建成功。
 - [x] v0.6.0 本地 RC ZIP 与 `.sha256`：已生成并核验一致。
-- [ ] GitHub Actions Windows x64 构建：待标签触发。
-- [ ] GitHub Actions macOS Apple Silicon 构建：待标签触发。
-- [ ] GitHub Actions macOS Intel 构建：待标签触发。
-- [ ] GitHub Release 包含 3 个 ZIP 与 3 个 SHA-256 文件：待 Actions 完成。
+- [x] GitHub Actions Windows x64 构建：通过。
+- [x] GitHub Actions macOS Apple Silicon 构建：通过。
+- [x] GitHub Actions macOS Intel 构建：通过。
+- [x] GitHub Release 包含 3 个 ZIP 与 3 个 SHA-256 文件：已发布并通过工作流校验。
 
 ## 发布边界
 
