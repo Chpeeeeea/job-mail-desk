@@ -11,7 +11,10 @@ a = Analysis(
     ["launcher.py"],
     pathex=["src"],
     binaries=[],
-    datas=[("src/job_mail_desk/ui", "job_mail_desk/ui")],
+    datas=[
+        ("src/job_mail_desk/ui", "job_mail_desk/ui"),
+        ("src/job_mail_desk/identity_data", "job_mail_desk/identity_data"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

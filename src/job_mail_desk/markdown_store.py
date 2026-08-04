@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -26,7 +27,14 @@ def _atomic_write(path: Path, content: str) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary_path, path)
+        for attempt in range(5):
+            try:
+                os.replace(temporary_path, path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (2**attempt))
     finally:
         if temporary_path.exists():
             temporary_path.unlink()
@@ -48,6 +56,11 @@ def render_task(task: JobTask) -> str:
         time_bits.append(f"结束：{task.end_at:%Y-%m-%d %H:%M}")
     if task.deadline_at:
         time_bits.append(f"截止：{task.deadline_at:%Y-%m-%d %H:%M}")
+    if task.completed_at:
+        inferred = "（由旧记录更新时间推定）" if task.completed_at_inferred else ""
+        time_bits.append(
+            f"完成：{task.completed_at:%Y-%m-%d %H:%M}{inferred}"
+        )
     requirements = (
         "\n".join(f"- {item}" for item in task.requirements)
         if task.requirements
@@ -125,6 +138,18 @@ class MarkdownTaskStore:
                 continue
         return tasks
 
+    def backfill_completed_times(self) -> int:
+        """Backfill legacy completions without pretending they are exact times."""
+        updates = 0
+        for task in self.all():
+            if task.status != "done" or task.completed_at:
+                continue
+            task.completed_at = task.updated_at or task.received_at
+            task.completed_at_inferred = True
+            self.save(task)
+            updates += 1
+        return updates
+
     def update_status(
         self,
         task_id: str,
@@ -134,8 +159,15 @@ class MarkdownTaskStore:
         task = self.load(task_id)
         if task is None:
             raise KeyError(task_id)
+        current = datetime.now().astimezone()
         task.status = status  # type: ignore[assignment]
         task.snoozed_until = snoozed_until
-        task.updated_at = datetime.now().astimezone()
+        if status == "done":
+            task.completed_at = task.completed_at or current
+            task.completed_at_inferred = False
+        else:
+            task.completed_at = None
+            task.completed_at_inferred = False
+        task.updated_at = current
         self.save(task)
         return task

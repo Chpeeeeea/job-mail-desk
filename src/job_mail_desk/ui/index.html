@@ -16,7 +16,7 @@
         <button id="addButton" class="icon-button" title="新建任务">＋</button>
         <button id="settingsButton" class="icon-button" title="设置">⚙</button>
         <button id="capsuleButton" class="icon-button" title="胶囊模式">▯</button>
-        <button id="scanButton" class="icon-button" title="立即扫描">↻</button>
+        <button id="scanButton" class="icon-button" title="扫描邮箱">↻</button>
       </div>
     </header>
 
@@ -47,7 +47,7 @@
     <footer>
       <span id="healthDot" class="health-dot"></span>
       <span id="healthText">读取本地任务中…</span>
-      <button id="refreshButton" class="text-button">刷新</button>
+      <button id="refreshButton" class="text-button" title="立即扫描邮箱并刷新任务">扫描邮箱</button>
     </footer>
 
     <template id="taskTemplate">
@@ -160,6 +160,21 @@
             <button type="button" data-pick-path="progress_source">选择</button>
           </div>
           <button type="button" id="createProgressTemplate" class="secondary-wide">生成规范台账模板</button>
+        </section>
+
+        <section class="settings-section dictionary-section">
+          <div class="settings-section-head">
+            <h3>企业与岗位词典</h3>
+            <span id="dictionaryBadge" class="version-chip">正在读取</span>
+          </div>
+          <p>程序已内置通用秋招词典。也可以导入自己的 XLSX 表格，在本机追加企业、招聘项目和岗位名称。</p>
+          <label>工作表名称<input name="dictionary_sheet" value="2027秋招信息表" placeholder="例如：2027秋招信息表"></label>
+          <div class="path-row">
+            <input name="dictionary_workbook" aria-label="秋招词典工作簿" readonly placeholder="选择 .xlsx 文件">
+            <button type="button" id="selectDictionaryWorkbook">选择</button>
+          </div>
+          <button type="button" id="compileDictionaryWorkbook" class="secondary-wide">编译并启用个人词典</button>
+          <div id="dictionaryStatus" class="update-status">内置词典可直接使用</div>
         </section>
 
         <section class="settings-section update-section">

@@ -155,6 +155,11 @@ def export_dashboard(
             item
             for item in tasks
             if item.status not in {"cancelled", "expired", "irrelevant"}
+            and not (
+                item.event_type == "application"
+                and item.status == "confirmed"
+                and critical_time(item) is None
+            )
         ],
         key=lambda item: (
             critical_time(item) is None,

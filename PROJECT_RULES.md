@@ -62,6 +62,7 @@ jobmaildesk task-update <稳定任务ID> [字段参数]
 - 标签构建必须自动发布三个平台 ZIP 及各自 SHA-256，共六个资产；当前未签名、公证或未完成三天试运行的版本必须标记为 prerelease。
 - 发布前必须通过测试、秘密扫描、正常启动、缓存启动、正常退出、Obsidian往返同步和解析回归。
 - 每个可验证的阶段性进展都必须更新`CHANGELOG.md`；禁止只有代码提交而没有面向用户的变更记录。
+- `CHANGELOG.md` 只保留在源码仓库和 Release 展示中，不复制进终端用户安装包；程序内更新说明读取 GitHub Release Notes。
 - 阶段验收通过后应形成独立、可回滚的Git提交并推送到GitHub，不把多个完成阶段长期积压在本地工作树。
 - 推送前再次执行`pytest`、秘密扫描和`git diff --check`；远端推送成功后核对提交SHA与GitHub Actions状态。
 - 已发布标签和资产不得覆盖、删除或重新指向；发现问题时发布更高PATCH版本。

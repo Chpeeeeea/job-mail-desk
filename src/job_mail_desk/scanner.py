@@ -1,19 +1,39 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 import logging
 
-from .config import DASHBOARD_FILE, STATE_DB, TASKS_DIR, Settings, ensure_directories
+from .application_registry import ApplicationRegistry, preview_progress_applications
+from .config import (
+    APPLICATIONS_DIR,
+    DASHBOARD_FILE,
+    DICTIONARIES_DIR,
+    STATE_DB,
+    TASKS_DIR,
+    UNRESOLVED_DIR,
+    Settings,
+    ensure_directories,
+)
 from .credentials import load_credential
 from .exporter import export_dashboard, import_checked_states
 from .mail_reader import ImapReader
+from .identity_dictionaries import load_identity_dictionaries
+from .identity_pipeline import resolve_event_batch
+from .identity_resolver import ResolutionResult
 from .markdown_store import MarkdownTaskStore
+from .models import ApplicationRecord
 from .parser import PARSER_VERSION, SHANGHAI, parse_record
-from .progress import export_progress
+from .progress import export_progress, sync_current_applications_to_ledger
 from .research import synchronize_research_state
 from .state import StateStore
-from .task_service import critical_time, message_hash, task_from_event
+from .task_service import (
+    critical_time,
+    message_hash,
+    legacy_application_id,
+    task_from_event,
+)
+from .unresolved_store import UnresolvedStore, unresolved_from_decision
 
 
 LOGGER = logging.getLogger(__name__)
@@ -31,6 +51,11 @@ class ScanSummary:
     exported: int
     shadow: bool
     preview: tuple[dict[str, object], ...] = ()
+    identity_mode: str = "legacy"
+    identity_matched: int = 0
+    identity_new_applications: int = 0
+    identity_unresolved: int = 0
+    identity_conflicts: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -45,10 +70,12 @@ def _effective_lookback_days(
     settings: Settings,
     state: StateStore,
     requested_days: int | None,
+    *,
+    parser_changed: bool = False,
 ) -> int:
     if requested_days is not None:
         return requested_days
-    if not state.has_successful_scan():
+    if parser_changed or not state.has_successful_scan():
         return max(INITIAL_LOOKBACK_DAYS, settings.lookback_days)
     return settings.lookback_days
 
@@ -62,24 +89,182 @@ def _is_stale_attention(task, now: datetime) -> bool:
     )
 
 
+def _resolution_applications(settings: Settings):
+    records = {
+        record.application_key: record
+        for record in ApplicationRegistry(APPLICATIONS_DIR).all()
+    }
+    for record in preview_progress_applications(settings.progress_source):
+        records.setdefault(record.application_key, record)
+    return list(records.values())
+
+
+def _company_key(dictionaries, company: str | None) -> str:
+    return dictionaries.company_id(company) or (company or "unknown-company").casefold()
+
+
+def _application_from_decision(
+    decision,
+    dictionaries,
+    legacy_id: str,
+) -> ApplicationRecord:
+    candidate = decision.candidate
+    return ApplicationRecord(
+        application_key=decision.application_key,
+        company_key=_company_key(dictionaries, candidate.company),
+        company=candidate.company or "公司待确认",
+        recruiting_project=candidate.recruiting_project,
+        recruiting_year=candidate.recruiting_year,
+        business_unit=candidate.business_unit,
+        role=candidate.role,
+        role_aliases=[],
+        job_code=candidate.job_code,
+        submitted_at=decision.event.source_received_at,
+        status="active",
+        source="mail",
+        confirmed_by_user=False,
+        identity_locked=False,
+        legacy_application_ids=[legacy_id],
+        identity_evidence=["explicit-application-mail"],
+    )
+
+
+def _legacy_id_for_key(
+    application_key: str,
+    registry: ApplicationRegistry,
+    store: MarkdownTaskStore,
+) -> str | None:
+    task_ids = {
+        task.application_id
+        for task in store.all()
+        if task.application_key == application_key
+    }
+    if len(task_ids) == 1:
+        return next(iter(task_ids))
+    if len(task_ids) > 1:
+        return None
+    record = registry.load(application_key)
+    if record:
+        legacy_ids = set(record.legacy_application_ids)
+        if len(legacy_ids) == 1:
+            return next(iter(legacy_ids))
+        if len(legacy_ids) > 1:
+            return None
+    return legacy_application_id(application_key)
+
+
+def _backfill_task_application_keys(
+    registry: ApplicationRegistry,
+    store: MarkdownTaskStore,
+) -> int:
+    legacy_candidates: dict[str, set[str]] = {}
+    for record in registry.all(ignore_invalid=True):
+        for legacy_id in record.legacy_application_ids:
+            legacy_candidates.setdefault(legacy_id, set()).add(record.application_key)
+    legacy_map = {
+        legacy_id: next(iter(keys))
+        for legacy_id, keys in legacy_candidates.items()
+        if len(keys) == 1
+    }
+    updated = 0
+    for task in store.all():
+        if task.application_key:
+            continue
+        application_key = legacy_map.get(task.application_id)
+        if not application_key:
+            continue
+        task.application_key = application_key
+        store.save(task)
+        updated += 1
+    return updated
+
+
+def _scan_identity_preview(
+    settings: Settings,
+    *,
+    days: int | None = None,
+) -> ScanSummary:
+    """Replay a bounded mailbox window without changing tasks or scan state."""
+    ensure_directories()
+    effective_days = days if days is not None else settings.lookback_days
+    records = ImapReader(settings, load_credential()).fetch_since(effective_days)
+    events = []
+    parse_failed = 0
+    for record in records:
+        try:
+            event = parse_record(record)
+        except Exception:
+            parse_failed += 1
+            LOGGER.exception(
+                "身份预览解析失败，已隔离 uid=%s",
+                record.uid,
+            )
+            continue
+        if event:
+            events.append(event)
+    dictionaries = load_identity_dictionaries(DICTIONARIES_DIR)
+    decisions = resolve_event_batch(
+        events,
+        _resolution_applications(settings),
+        dictionaries,
+    )
+    preview = tuple(decision.to_preview() for decision in decisions)
+    return ScanSummary(
+        fetched=len(records),
+        skipped=0,
+        candidates=len(events),
+        tasks_updated=0,
+        parse_failed=parse_failed,
+        research_queued=0,
+        urgent=0,
+        exported=0,
+        shadow=True,
+        preview=preview,
+        identity_mode="preview",
+        identity_matched=sum(
+            decision.action in {"matched", "batch_context_match"}
+            for decision in decisions
+        ),
+        identity_new_applications=sum(
+            decision.action == "new_application" for decision in decisions
+        ),
+        identity_unresolved=sum(
+            decision.action == "unresolved" for decision in decisions
+        ),
+        identity_conflicts=sum(
+            decision.action == "conflict" for decision in decisions
+        ),
+    )
+
+
 def scan_once(
     settings: Settings,
     *,
     days: int | None = None,
     shadow: bool = False,
+    identity_preview: bool = False,
 ) -> ScanSummary:
+    if identity_preview:
+        return _scan_identity_preview(settings, days=days)
     ensure_directories()
     store = MarkdownTaskStore(TASKS_DIR)
+    store.backfill_completed_times()
     state = StateStore(STATE_DB)
-    state.prepare_parser_version(PARSER_VERSION)
+    parser_changed = state.prepare_parser_version(PARSER_VERSION)
     run_id = state.begin_scan()
     fetched = skipped = candidates = updated = parse_failed = queued = urgent = exported = 0
     preview: list[dict[str, object]] = []
     try:
         if settings.obsidian_enabled:
             import_checked_states(settings.obsidian_output, store)
-        effective_days = _effective_lookback_days(settings, state, days)
+        effective_days = _effective_lookback_days(
+            settings,
+            state,
+            days,
+            parser_changed=parser_changed,
+        )
         records = ImapReader(settings, load_credential()).fetch_since(effective_days)
+        pending_events: list[tuple[object, str, object]] = []
         for record in records:
             fetched += 1
             source_id = record.message_id or f"imap-uid:{record.uid}"
@@ -100,41 +285,101 @@ def scan_once(
                     type(exc).__name__,
                 )
                 continue
-            task_identifier = None
             if event:
                 candidates += 1
-                task = task_from_event(event, store)
-                task_identifier = task.id
-                if shadow:
-                    preview.append(
-                        {
-                            "company": task.company,
-                            "role": task.role,
-                            "project": task.recruiting_project,
-                            "stage": task.stage,
-                            "round": task.round,
-                            "start_at": task.start_at.isoformat()
-                            if task.start_at
-                            else None,
-                            "end_at": task.end_at.isoformat()
-                            if task.end_at
-                            else None,
-                            "deadline_at": task.deadline_at.isoformat()
-                            if task.deadline_at
-                            else None,
-                            "change_type": task.change_type,
-                            "confidence": task.confidence,
-                        }
-                    )
-                if not shadow:
-                    store.save(task)
-                    updated += 1
-                    if task.priority == "urgent":
-                        urgent += 1
-                    # Core never creates public research requests. Research is
-                    # an external opt-in extension and cannot block mail sync.
-            if not shadow:
-                state.mark_processed(source_hash, task_identifier)
+                pending_events.append((event, source_hash, record))
+            elif not shadow:
+                state.mark_processed(source_hash, None)
+
+        dictionaries = load_identity_dictionaries(DICTIONARIES_DIR)
+        registry = ApplicationRegistry(APPLICATIONS_DIR)
+        if not shadow and settings.progress_source:
+            registry.import_progress(settings.progress_source)
+        if not shadow:
+            _backfill_task_application_keys(registry, store)
+        applications = (
+            _resolution_applications(settings)
+            if shadow
+            else registry.all(ignore_invalid=True)
+        )
+        decisions = resolve_event_batch(
+            [item[0] for item in pending_events],
+            applications,
+            dictionaries,
+        )
+        unresolved_store = UnresolvedStore(UNRESOLVED_DIR)
+        identity_matched = identity_new = identity_unresolved = identity_conflicts = 0
+        for (event, source_hash, _record), decision in zip(
+            pending_events,
+            decisions,
+            strict=True,
+        ):
+            if shadow:
+                preview.append(decision.to_preview())
+                continue
+            if decision.action in {"unresolved", "conflict"}:
+                unresolved_store.save(unresolved_from_decision(source_hash, decision))
+                if decision.action == "conflict":
+                    identity_conflicts += 1
+                else:
+                    identity_unresolved += 1
+                state.mark_processed(source_hash, None)
+                continue
+
+            application_key = decision.application_key
+            if not application_key:
+                unresolved_store.save(unresolved_from_decision(source_hash, decision))
+                identity_unresolved += 1
+                state.mark_processed(source_hash, None)
+                continue
+            resolved_legacy_id = _legacy_id_for_key(application_key, registry, store)
+            if not resolved_legacy_id:
+                conflict_decision = replace(
+                    decision,
+                    action="conflict",
+                    resolution=ResolutionResult(
+                        status="conflict",
+                        application_key=None,
+                        confidence=0.0,
+                        reason="legacy-application-id-not-unique",
+                        candidates=decision.resolution.candidates,
+                        rule_version=decision.resolution.rule_version,
+                    ),
+                )
+                unresolved_store.save(
+                    unresolved_from_decision(source_hash, conflict_decision)
+                )
+                identity_conflicts += 1
+                state.mark_processed(source_hash, None)
+                continue
+
+            record = registry.load(application_key)
+            if decision.action == "new_application" and not record:
+                record = _application_from_decision(
+                    decision,
+                    dictionaries,
+                    resolved_legacy_id,
+                )
+                registry.save(record)
+                identity_new += 1
+            else:
+                identity_matched += 1
+                if record and resolved_legacy_id not in record.legacy_application_ids:
+                    record.legacy_application_ids.append(resolved_legacy_id)
+                    record.legacy_application_ids.sort()
+                    registry.save(record)
+
+            task = task_from_event(
+                event,
+                store,
+                application_key=application_key,
+                resolved_application_id=resolved_legacy_id,
+            )
+            store.save(task)
+            updated += 1
+            if task.priority == "urgent":
+                urgent += 1
+            state.mark_processed(source_hash, task.id)
         if not shadow:
             tasks = store.all()
             synchronize_research_state(
@@ -158,6 +403,18 @@ def scan_once(
                     task.status = "expired"
                     store.save(task)
             tasks = store.all()
+            if settings.progress_enabled:
+                try:
+                    sync_current_applications_to_ledger(
+                        tasks,
+                        settings.progress_source,
+                    )
+                except PermissionError as exc:
+                    LOGGER.warning(
+                        "Progress ledger is temporarily locked; "
+                        "mail scan will continue and retry next cycle: %s",
+                        exc,
+                    )
             export_dashboard(tasks, DASHBOARD_FILE, settings)
             if settings.obsidian_enabled:
                 exported = export_dashboard(
@@ -182,6 +439,30 @@ def scan_once(
             exported=exported,
             shadow=shadow,
             preview=tuple(preview),
+            identity_mode="registry",
+            identity_matched=(
+                sum(
+                    decision.action in {"matched", "batch_context_match"}
+                    for decision in decisions
+                )
+                if shadow
+                else identity_matched
+            ),
+            identity_new_applications=(
+                sum(decision.action == "new_application" for decision in decisions)
+                if shadow
+                else identity_new
+            ),
+            identity_unresolved=(
+                sum(decision.action == "unresolved" for decision in decisions)
+                if shadow
+                else identity_unresolved
+            ),
+            identity_conflicts=(
+                sum(decision.action == "conflict" for decision in decisions)
+                if shadow
+                else identity_conflicts
+            ),
         )
         state.finish_scan(run_id, fetched=fetched, candidates=candidates)
         return summary

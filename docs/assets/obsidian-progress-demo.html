@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobMailDesk Obsidian Progress Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --chrome: #242322;
+      --sidebar: #f1efea;
+      --paper: #fbfaf7;
+      --ink: #292722;
+      --muted: #777168;
+      --line: #ded9cf;
+      --accent: #b95843;
+      --accent-soft: #f3ded7;
+      --green: #4f725e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #d8d5cf;
+      color: var(--ink);
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    }
+    .window {
+      width: 1440px;
+      height: 900px;
+      overflow: hidden;
+      background: var(--paper);
+      box-shadow: 0 30px 80px rgba(28, 26, 23, .28);
+    }
+    .titlebar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      background: var(--chrome);
+      color: #f6f3ed;
+      font-size: 14px;
+    }
+    .titlebar .traffic { display: flex; gap: 9px; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; background: #77736d; }
+    .dot:first-child { background: #c76352; }
+    .dot:nth-child(2) { background: #c6a052; }
+    .dot:nth-child(3) { background: #66876e; }
+    .workspace { display: grid; grid-template-columns: 62px 286px 1fr; height: 852px; }
+    .ribbon {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      padding-top: 22px;
+      border-right: 1px solid #d7d2c8;
+      background: #e6e2da;
+      color: #6f6a62;
+    }
+    .ribbon span { font-size: 20px; opacity: .82; }
+    .ribbon .active {
+      width: 36px; height: 36px; display: grid; place-items: center;
+      border-radius: 10px; background: #fff; color: var(--accent);
+      box-shadow: 0 4px 14px rgba(45, 42, 36, .08);
+    }
+    .sidebar {
+      padding: 22px 18px;
+      border-right: 1px solid #ded9cf;
+      background: var(--sidebar);
+      color: #5d5952;
+      font-size: 14px;
+    }
+    .vault { margin-bottom: 24px; color: #35322e; font-weight: 800; }
+    .group { margin: 16px 0 8px; color: #938d84; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+    .file { padding: 8px 10px; border-radius: 7px; white-space: nowrap; }
+    .file.active { background: #fff; color: var(--accent); font-weight: 800; box-shadow: 0 3px 12px rgba(40, 37, 32, .06); }
+    .main { overflow: hidden; background: var(--paper); }
+    .tabbar {
+      height: 42px;
+      display: flex;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+      background: #f5f3ee;
+    }
+    .tab {
+      min-width: 235px;
+      padding: 12px 18px 10px;
+      border-right: 1px solid var(--line);
+      background: var(--paper);
+      color: #46423c;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .document { width: 850px; margin: 0 auto; padding: 44px 42px 80px; }
+    h1 { margin: 0 0 8px; font: 800 34px/1.2 Georgia, "Microsoft YaHei UI", serif; }
+    .meta { color: var(--muted); font-size: 12px; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 28px 0 24px;
+    }
+    .metric { padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .metric strong { display: block; margin-bottom: 4px; font-size: 22px; }
+    .metric span { color: var(--muted); font-size: 11px; }
+    .metric.urgent { border-color: #dfb1a6; background: #fff6f3; color: var(--accent); }
+    details {
+      margin: 12px 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: #fff;
+      box-shadow: 0 5px 18px rgba(41, 37, 31, .045);
+    }
+    summary {
+      display: grid;
+      grid-template-columns: 20px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 15px 17px;
+      cursor: default;
+      list-style: none;
+      font-size: 14px;
+      font-weight: 800;
+    }
+    summary::before { content: "›"; color: var(--muted); font-size: 22px; transform: rotate(90deg); }
+    details:not([open]) summary::before { transform: rotate(0); }
+    .badge { padding: 5px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 10px; }
+    .body { padding: 0 17px 18px 47px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 9px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { width: 112px; background: #f7f5f0; color: var(--muted); font-weight: 700; }
+    h3 { margin: 20px 0 9px; font-size: 13px; }
+    .timeline { display: grid; grid-template-columns: 118px 1fr auto; gap: 0; border-top: 1px solid var(--line); }
+    .timeline div { padding: 9px 8px; border-bottom: 1px solid var(--line); font-size: 11px; }
+    .timeline .time { color: var(--muted); font-family: Consolas, monospace; }
+    .done { color: var(--green); font-weight: 800; }
+    .sync-note { margin-top: 18px; color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="traffic"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <strong>求职当前进展 · Job Search Vault</strong>
+      <span>Obsidian</span>
+    </div>
+    <div class="workspace">
+      <aside class="ribbon"><span class="active">◇</span><span>⌕</span><span>⌁</span><span>▦</span><span>⚙</span></aside>
+      <aside class="sidebar">
+        <div class="vault">Job Search Vault</div>
+        <div class="group">投递跟踪</div>
+        <div class="file">岗位投递决策台账.md</div>
+        <div class="file active">求职当前进展.md</div>
+        <div class="file">本周硬截止.md</div>
+        <div class="group">企业专项</div>
+        <div class="file">示例科技.md</div>
+        <div class="file">未来零售.md</div>
+        <div class="group">准备材料</div>
+        <div class="file">笔试问题汇总.md</div>
+        <div class="file">群面准备清单.md</div>
+      </aside>
+      <main class="main">
+        <div class="tabbar"><div class="tab">求职当前进展.md</div></div>
+        <article class="document">
+          <h1>求职当前进展</h1>
+          <div class="meta">由 JobMailDesk 受控同步 · 最后更新 2026-08-04 11:18</div>
+          <section class="summary">
+            <div class="metric"><strong>3</strong><span>进行中的申请</span></div>
+            <div class="metric"><strong>1</strong><span>等待后续</span></div>
+            <div class="metric urgent"><strong>1</strong><span>七天内硬截止</span></div>
+            <div class="metric"><strong>0</strong><span>身份冲突</span></div>
+          </section>
+          <details open>
+            <summary><span>示例科技 · AI 产品经理（J100001）</span><span class="badge">测评已完成</span></summary>
+            <div class="body">
+              <table>
+                <tr><th>当前进展</th><td><strong>人才测评已完成，等待后续筛选 / 面试</strong></td></tr>
+                <tr><th>招聘项目</th><td>2027 届校园招聘 · 第 1 志愿</td></tr>
+                <tr><th>阶段 / 轮次</th><td>人才测评 · 第一轮</td></tr>
+                <tr><th>截止时间</th><td>2026-08-08 23:59</td></tr>
+                <tr><th>完成时间</th><td class="done">2026-08-03 20:14</td></tr>
+                <tr><th>下一步</th><td>关注邮件与电话通知，准备产品案例复盘</td></tr>
+              </table>
+              <h3>流程记录</h3>
+              <div class="timeline">
+                <div class="time">08-01 12:33</div><div>网申成功提交</div><div class="done">已完成</div>
+                <div class="time">08-02 09:18</div><div>收到校园招聘在线测评</div><div>人才测评</div>
+                <div class="time">08-03 20:14</div><div>在线测评完成，进入等待后续</div><div class="done">已完成</div>
+              </div>
+              <div class="sync-note">稳定申请 ID：demo-tech-ai-pm-j100001 · 手写区域不会被自动覆盖</div>
+            </div>
+          </details>
+          <details>
+            <summary><span>未来零售 · 产品培训生</span><span class="badge">面试待参加</span></summary>
+          </details>
+          <details>
+            <summary><span>云端互动 · 项目管理培训生</span><span class="badge">时间待确认</span></summary>
+          </details>
+        </article>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

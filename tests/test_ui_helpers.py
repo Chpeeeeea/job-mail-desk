@@ -128,6 +128,9 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert 'id="createProgressTemplate"' in html
     assert 'id="checkUpdates"' in html
     assert 'id="openUpdateRelease"' in html
+    assert 'id="selectDictionaryWorkbook"' in html
+    assert 'id="compileDictionaryWorkbook"' in html
+    assert 'name="dictionary_sheet"' in html
     assert 'id="openUpdateRelease" class="secondary-wide"' in html
     assert '>打开下载页</button>' in html
     assert ".update-actions button" in stylesheet
@@ -135,11 +138,38 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert 'id="updateBanner"' in html
     assert 'window.openSettingsDialog = showSettingsDialog' in javascript
     assert 'window.checkForUpdates = checkForUpdates' in javascript
+    settings_function = javascript.split(
+        "async function showSettingsDialog", 1
+    )[1].split("window.openSettingsDialog", 1)[0]
+    assert "set_editor_mode(true)" not in settings_function
+    assert "get_dictionary_status" in javascript
+    assert "compile_dictionary_workbook" in javascript
     assert 'new Set(["toggle_done", "snooze", "ignore"])' in javascript
     assert 'button.textContent = "再点确认"' in javascript
     assert 'document.createElement("details")' in javascript
     assert 'toggleAll.textContent = allExpanded ? "收起全部" : "展开全部"' in javascript
     assert "grid-template-columns: 12px minmax(0, 1fr) max-content" in stylesheet
+
+
+def test_dictionary_status_uses_bundled_defaults(tmp_path, monkeypatch) -> None:
+    imported = tmp_path / "dictionaries" / "imported"
+    monkeypatch.setattr("job_mail_desk.ui_app.TASKS_DIR", tmp_path / "tasks")
+    monkeypatch.setattr(
+        "job_mail_desk.ui_app.DICTIONARIES_DIR",
+        tmp_path / "dictionaries",
+    )
+    monkeypatch.setattr(
+        "job_mail_desk.ui_app.IMPORTED_DICTIONARIES_DIR",
+        imported,
+    )
+    status = DesktopApi(Settings()).get_dictionary_status()
+    assert status["counts"] == {
+        "companies": 520,
+        "programs": 129,
+        "roles": 2825,
+        "mail_templates": 4,
+    }
+    assert status["user_dictionary_enabled"] is False
 
 
 def test_show_existing_window_is_windows_only(monkeypatch) -> None:

@@ -1,0 +1,41 @@
+version: 1
+mail_templates:
+  - id: jd-application-received
+    company_id: jd
+    kind: application_receipt
+    subject_patterns:
+      - "我们已收到你的申请"
+    body_patterns:
+      - "感谢你对京东校招的关注"
+      - "我们已收到申请"
+    identity_fields: [job_code, role, recruiting_project]
+    creates_application: false
+  - id: generic-application-success
+    company_id: null
+    kind: application_receipt
+    subject_patterns:
+      - "网申成功提交"
+      - "申请已提交"
+    body_patterns: []
+    identity_fields: [job_code, role, recruiting_project]
+    creates_application: false
+  - id: generic-assessment-invitation
+    company_id: null
+    kind: assessment_invitation
+    subject_patterns:
+      - "测评通知"
+      - "在线测评"
+    body_patterns:
+      - "邀请您参与"
+    identity_fields: [job_code, role, recruiting_project, deadline]
+    creates_application: false
+  - id: generic-resume-completion
+    company_id: null
+    kind: resume_action
+    subject_patterns:
+      - "完善简历信息"
+    body_patterns:
+      - "请在"
+      - "前"
+    identity_fields: [job_code, role, recruiting_project, deadline]
+    creates_application: false

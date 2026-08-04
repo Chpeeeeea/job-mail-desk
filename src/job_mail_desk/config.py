@@ -22,6 +22,11 @@ def _local_root() -> Path:
 LOCAL_ROOT = _local_root()
 CONFIG_PATH = LOCAL_ROOT / "config.toml"
 TASKS_DIR = LOCAL_ROOT / "tasks"
+APPLICATIONS_DIR = LOCAL_ROOT / "applications"
+DICTIONARIES_DIR = LOCAL_ROOT / "dictionaries"
+IMPORTED_DICTIONARIES_DIR = DICTIONARIES_DIR / "imported"
+MANUAL_DICTIONARIES_DIR = DICTIONARIES_DIR / "manual"
+UNRESOLVED_DIR = LOCAL_ROOT / "unresolved"
 DIGESTS_DIR = LOCAL_ROOT / "digests"
 LOG_DIR = LOCAL_ROOT / "logs"
 STATE_DB = LOCAL_ROOT / "state.db"
@@ -63,6 +68,11 @@ def ensure_directories() -> None:
     for path in (
         LOCAL_ROOT,
         TASKS_DIR,
+        APPLICATIONS_DIR,
+        DICTIONARIES_DIR,
+        IMPORTED_DICTIONARIES_DIR,
+        MANUAL_DICTIONARIES_DIR,
+        UNRESOLVED_DIR,
         DIGESTS_DIR,
         LOG_DIR,
     ):

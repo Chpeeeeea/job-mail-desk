@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 
 from job_mail_desk.markdown_store import MarkdownTaskStore
 from job_mail_desk.models import JobTask
@@ -70,6 +71,43 @@ def test_markdown_does_not_persist_mail_body(tmp_path) -> None:
     content = path.read_text(encoding="utf-8")
     assert "FULL_PRIVATE_MAIL_BODY_MARKER" not in content
     assert "token=secret" in content  # Local task may retain its private source URL.
+
+
+def test_markdown_atomic_write_retries_transient_windows_lock(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    real_replace = os.replace
+    attempts = {"count": 0}
+
+    def flaky_replace(source, target):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise PermissionError(5, "access denied")
+        real_replace(source, target)
+
+    monkeypatch.setattr("job_mail_desk.markdown_store.os.replace", flaky_replace)
+    monkeypatch.setattr("job_mail_desk.markdown_store.time.sleep", lambda _delay: None)
+    path = MarkdownTaskStore(tmp_path).save(task())
+
+    assert attempts["count"] == 3
+    assert path.exists()
+
+
+def test_legacy_completion_time_is_backfilled_and_marked_inferred(tmp_path) -> None:
+    item = task()
+    item.status = "done"
+    item.updated_at = datetime(2026, 8, 3, 9, 30, tzinfo=SHANGHAI)
+    store = MarkdownTaskStore(tmp_path)
+    store.save(item)
+    assert store.backfill_completed_times() == 1
+    migrated = store.load(item.id)
+    assert migrated is not None
+    assert migrated.completed_at == item.updated_at
+    assert migrated.completed_at_inferred is True
+    content = store.path_for(item.id).read_text(encoding="utf-8")
+    assert "完成：2026-08-03 09:30（由旧记录更新时间推定）" in content
+    assert "结束：2026-08-02 21:00" in content
 
 
 def test_completed_task_closes_pending_research(tmp_path) -> None:

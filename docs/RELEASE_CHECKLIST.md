@@ -6,6 +6,8 @@ JobMailDesk Core 使用带版本号的 Git 标签触发 GitHub 预发布。当�
 
 - `CHANGELOG.md` 已记录本阶段面向用户的变化。
 - `docs/RELEASE_NOTES_vX.Y.Z.md` 存在，文件名与标签一致。
+- `docs/ACCEPTANCE_vX.Y.Z.md` 存在，并记录本地验收与待由 Actions 完成的远端门禁。
+- 标签 `vX.Y.Z` 必须与 `pyproject.toml`、`job_mail_desk.__version__` 完全一致。
 - Pull Request 的 Windows x64、macOS Apple Silicon、macOS Intel 构建全部通过。
 - `pytest`、秘密扫描与 `git diff --check` 通过。
 - IMAP 保持 `readonly=True` 与 `BODY.PEEK`，扫描前后的未读数和 UID 状态不变。

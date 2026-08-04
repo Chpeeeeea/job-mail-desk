@@ -34,6 +34,13 @@ setup(
     app=APP,
     package_dir={"": str(SOURCE_ROOT)},
     packages=find_packages(str(SOURCE_ROOT)),
-    package_data={"job_mail_desk": ["ui/*.html", "ui/*.css", "ui/*.js"]},
+    package_data={
+        "job_mail_desk": [
+            "ui/*.html",
+            "ui/*.css",
+            "ui/*.js",
+            "identity_data/*.yml",
+        ]
+    },
     options={"py2app": OPTIONS},
 )
