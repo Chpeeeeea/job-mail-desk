@@ -113,4 +113,19 @@ foreach ($capture in $captures) {
   }
 }
 
+$obsidianDemo = Join-Path $repoRoot "docs\assets\obsidian-progress-demo.html"
+$obsidianTarget = Join-Path $outputRoot "jobmaildesk-obsidian-progress.png"
+& $browser @(
+  "--headless=new",
+  "--disable-gpu",
+  "--hide-scrollbars",
+  "--force-device-scale-factor=1",
+  "--window-size=1440,900",
+  "--screenshot=$obsidianTarget",
+  ([Uri]$obsidianDemo).AbsoluteUri
+) | Out-Null
+if (-not (Test-Path -LiteralPath $obsidianTarget)) {
+  throw "Obsidian progress preview capture failed: $obsidianTarget"
+}
+
 Write-Host "README previews written to $outputRoot"

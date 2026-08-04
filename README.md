@@ -103,6 +103,12 @@ JobMailDesk Core 是已经包含运行环境的桌面程序。普通用户不需
 | :---: | :---: |
 | <img src="docs/assets/jobmaildesk-week.png" alt="JobMailDesk 周历匿名演示" width="100%"> | <img src="docs/assets/jobmaildesk-calendar.png" alt="JobMailDesk 月历匿名演示" width="100%"> |
 
+| Obsidian 求职进展 |
+| :---: |
+| <img src="docs/assets/jobmaildesk-obsidian-progress.png" alt="JobMailDesk 自动生成的 Obsidian 求职进展匿名示例" width="900"> |
+
+桌面卡片负责即时操作，Obsidian 进展页负责长期通览。每个岗位是一张默认可折叠的申请卡，展开后可查看当前阶段、轮次、截止时间、完成时间、下一步和完整流程记录。
+
 > 预览全部由虚构公司和匿名任务生成，不包含真实邮箱、投递记录或私人通知链接。维护者可运行 `scripts/capture-readme-previews.ps1` 从同一演示数据重新生成高清截图。
 
 ---
