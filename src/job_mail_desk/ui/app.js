@@ -23,6 +23,26 @@ const settingsDialog = document.querySelector("#settingsDialog");
 const settingsForm = document.querySelector("#settingsForm");
 let updatePollTimer = null;
 
+const MAIL_PROVIDER_PRESETS = Object.freeze({
+  qq: { host: "imap.qq.com", port: 993, ssl: true },
+  163: { host: "imap.163.com", port: 993, ssl: true },
+  126: { host: "imap.126.com", port: 993, ssl: true },
+  yeah: { host: "imap.yeah.net", port: 993, ssl: true },
+  gmail: { host: "imap.gmail.com", port: 993, ssl: true },
+  outlook: { host: "outlook.office365.com", port: 993, ssl: true },
+  custom: { host: "", port: 993, ssl: true },
+});
+
+function applyMailProviderPreset() {
+  const provider = settingsForm.elements.mail_provider.value;
+  const preset = MAIL_PROVIDER_PRESETS[provider];
+  // Custom deliberately leaves all manually entered values untouched.
+  if (!preset || provider === "custom") return;
+  settingsForm.elements.mail_host.value = preset.host;
+  settingsForm.elements.mail_port.value = preset.port;
+  settingsForm.elements.mail_ssl.checked = preset.ssl;
+}
+
 function apiReady() {
   return window.pywebview && window.pywebview.api;
 }
@@ -687,6 +707,15 @@ async function showSettingsDialog(firstRun = false, payload = null) {
   document.querySelector("#settingsStatus").textContent = "";
   settingsForm.elements.email.value = settings.email || "";
   settingsForm.elements.authorization_code.value = "";
+  const configuredProvider = settings.mail_provider || settings.provider || "custom";
+  settingsForm.elements.mail_provider.value =
+    MAIL_PROVIDER_PRESETS[configuredProvider] ? configuredProvider : "custom";
+  settingsForm.elements.mail_host.value = settings.mail_host || "";
+  settingsForm.elements.mail_port.value = settings.mail_port || 993;
+  settingsForm.elements.mail_ssl.checked =
+    settings.mail_ssl === undefined
+      ? settings.ssl !== false
+      : Boolean(settings.mail_ssl);
   settingsForm.elements.poll_minutes.value = settings.poll_minutes || 10;
   settingsForm.elements.lookback_days.value = settings.lookback_days || 3;
   settingsForm.elements.obsidian_enabled.checked = Boolean(settings.obsidian_enabled);
@@ -709,6 +738,12 @@ function settingsPayload() {
   return {
     email: settingsForm.elements.email.value.trim(),
     authorization_code: settingsForm.elements.authorization_code.value.trim(),
+    mail_provider: settingsForm.elements.mail_provider.value,
+    provider: settingsForm.elements.mail_provider.value,
+    mail_host: settingsForm.elements.mail_host.value.trim(),
+    mail_port: Number(settingsForm.elements.mail_port.value),
+    mail_ssl: settingsForm.elements.mail_ssl.checked,
+    ssl: settingsForm.elements.mail_ssl.checked,
     poll_minutes: Number(settingsForm.elements.poll_minutes.value),
     lookback_days: Number(settingsForm.elements.lookback_days.value),
     obsidian_enabled: settingsForm.elements.obsidian_enabled.checked,
@@ -978,6 +1013,7 @@ document.querySelector("#compileDictionaryWorkbook").addEventListener(
   compileDictionaryWorkbook,
 );
 document.querySelector("#testMailSettings").addEventListener("click", testMailSettings);
+document.querySelector("#mailProvider").addEventListener("change", applyMailProviderPreset);
 document.querySelector("#checkUpdates").addEventListener("click", checkForUpdates);
 document.querySelector("#openUpdateRelease").addEventListener("click", () => {
   if (apiReady()) window.pywebview.api.open_update_release();

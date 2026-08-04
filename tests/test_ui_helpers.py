@@ -110,6 +110,43 @@ def test_desktop_bridge_has_no_public_native_window() -> None:
     assert not hasattr(api, "install_update")
 
 
+def test_mail_connection_test_uses_unsaved_imap_form_values(monkeypatch) -> None:
+    captured = {}
+
+    class Reader:
+        def __init__(self, settings, credential):
+            captured["settings"] = settings
+            captured["credential"] = credential
+
+        def mailbox_snapshot(self):
+            return {"unseen": 0, "uidvalidity": "1", "uidnext": "2"}
+
+    monkeypatch.setattr("job_mail_desk.ui_app.ImapReader", Reader)
+    monkeypatch.setattr(
+        "job_mail_desk.ui_app.load_credential",
+        lambda: (_ for _ in ()).throw(RuntimeError("missing")),
+    )
+    result = DesktopApi(Settings()).test_mail_settings(
+        {
+            "email": "user@example.test",
+            "authorization_code": "one-time-code",
+            "mail_provider": "custom",
+            "mail_host": "mx.example.test",
+            "mail_port": 587,
+            "mail_ssl": False,
+            "poll_minutes": 10,
+            "lookback_days": 3,
+            "update_channel": "preview",
+        }
+    )
+
+    assert result["ok"] is True
+    assert captured["settings"].mail_host == "mx.example.test"
+    assert captured["settings"].mail_port == 587
+    assert captured["settings"].mail_ssl is False
+    assert captured["credential"].authorization_code == "one-time-code"
+
+
 def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     project_root = Path(__file__).resolve().parents[1]
     html = (project_root / "src/job_mail_desk/ui/index.html").read_text(
@@ -125,6 +162,14 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert 'data-action="edit_time"' in html
     assert '>邮件链接<' in html
     assert 'id="settingsDialog"' in html
+    assert 'name="mail_provider"' in html
+    assert 'value="custom"' in html
+    assert 'name="mail_host"' in html
+    assert 'name="mail_port"' in html
+    assert 'name="mail_ssl"' in html
+    assert "邮箱账号" in html
+    assert "客户端授权码" in html
+    assert "QQ邮箱" not in html
     assert 'id="createProgressTemplate"' in html
     assert 'id="checkUpdates"' in html
     assert 'id="openUpdateRelease"' in html
@@ -137,6 +182,8 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert "font-size: 10px" in stylesheet
     assert 'id="updateBanner"' in html
     assert 'window.openSettingsDialog = showSettingsDialog' in javascript
+    assert "applyMailProviderPreset" in javascript
+    assert "mail_ssl" in javascript
     assert 'window.checkForUpdates = checkForUpdates' in javascript
     settings_function = javascript.split(
         "async function showSettingsDialog", 1

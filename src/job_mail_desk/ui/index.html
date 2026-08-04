@@ -124,12 +124,28 @@
           </div>
           <button type="button" id="closeSettings" class="dialog-close">×</button>
         </div>
-        <p id="firstRunHint" class="settings-hint hidden">首次使用请配置QQ邮箱。授权码只保存在系统安全凭据库，本程序不保存QQ密码。</p>
+        <p id="firstRunHint" class="settings-hint hidden">首次使用请配置邮箱账号。客户端授权码只保存在系统安全凭据库，本程序不会把密码写入配置文件。</p>
 
         <section class="settings-section">
           <h3>邮箱与扫描</h3>
-          <label>QQ邮箱<input name="email" type="email" autocomplete="username" placeholder="请输入完整QQ邮箱"></label>
-          <label>IMAP授权码<input name="authorization_code" type="password" autocomplete="new-password" placeholder="已配置时留空即可"></label>
+          <label>邮箱账号<input name="email" type="email" autocomplete="username" placeholder="请输入完整邮箱地址"></label>
+          <label>客户端授权码<input name="authorization_code" type="password" autocomplete="new-password" placeholder="已配置时留空即可"></label>
+          <label>邮件服务商
+            <select name="mail_provider" id="mailProvider">
+              <option value="qq">QQ</option>
+              <option value="163">163</option>
+              <option value="126">126</option>
+              <option value="yeah">Yeah</option>
+              <option value="gmail">Gmail</option>
+              <option value="outlook">Outlook</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <div class="form-row">
+            <label>IMAP主机<input name="mail_host" autocomplete="off" placeholder="imap.example.com"></label>
+            <label>端口<input name="mail_port" type="number" min="1" max="65535" inputmode="numeric"></label>
+          </div>
+          <label class="toggle-label"><input name="mail_ssl" type="checkbox">使用 SSL/TLS</label>
           <div class="form-row">
             <label>扫描间隔（分钟）<input name="poll_minutes" type="number" min="5" max="120" value="10"></label>
             <label>回看天数<input name="lookback_days" type="number" min="1" max="30" value="3"></label>

@@ -87,14 +87,17 @@ class ImapReader:
         self.settings = settings
         self.credential = credential
 
+    def _client(self):
+        client_type = (
+            imaplib.IMAP4_SSL if self.settings.mail_ssl else imaplib.IMAP4
+        )
+        return client_type(self.settings.mail_host, self.settings.mail_port)
+
     def fetch_since(self, days: int | None = None) -> list[MailRecord]:
         lookback = days if days is not None else self.settings.lookback_days
         since_date: date = datetime.now(SHANGHAI).date() - timedelta(days=lookback)
         records: list[MailRecord] = []
-        with imaplib.IMAP4_SSL(
-            self.settings.mail_host,
-            self.settings.mail_port,
-        ) as client:
+        with self._client() as client:
             client.login(
                 self.credential.email,
                 self.credential.authorization_code,
@@ -132,10 +135,7 @@ class ImapReader:
 
     def mailbox_snapshot(self) -> dict[str, str | int | None]:
         """Read mailbox invariants without changing flags or UID state."""
-        with imaplib.IMAP4_SSL(
-            self.settings.mail_host,
-            self.settings.mail_port,
-        ) as client:
+        with self._client() as client:
             client.login(
                 self.credential.email,
                 self.credential.authorization_code,

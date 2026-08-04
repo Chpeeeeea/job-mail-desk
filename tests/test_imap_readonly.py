@@ -55,3 +55,14 @@ def test_imap_uses_readonly_and_body_peek(monkeypatch) -> None:
     assert FakeImap.instance.readonly is True
     assert "BODY.PEEK" in FakeImap.instance.fetch_query
 
+
+def test_imap_can_use_plain_connection_when_ssl_is_disabled(monkeypatch) -> None:
+    monkeypatch.setattr("job_mail_desk.mail_reader.imaplib.IMAP4", FakeImap)
+    records = ImapReader(
+        Settings(mail_ssl=False),
+        MailCredential("private@example.invalid", "authorization-code"),
+    ).fetch_since(1)
+    assert len(records) == 1
+    assert FakeImap.instance.readonly is True
+    assert "BODY.PEEK" in FakeImap.instance.fetch_query
+

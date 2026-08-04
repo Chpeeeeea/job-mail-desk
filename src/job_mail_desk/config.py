@@ -38,9 +38,106 @@ DEFAULT_PROGRESS_OUTPUT = LOCAL_ROOT / "求职当前进展.md"
 
 
 @dataclass(frozen=True)
+class MailProviderPreset:
+    """Editable defaults for the built-in IMAP provider choices."""
+
+    key: str
+    label: str
+    host: str
+    port: int = 993
+    ssl: bool = True
+
+
+MAIL_PROVIDER_PRESETS: dict[str, MailProviderPreset] = {
+    "qq": MailProviderPreset("qq", "QQ", "imap.qq.com"),
+    "163": MailProviderPreset("163", "163", "imap.163.com"),
+    "126": MailProviderPreset("126", "126", "imap.126.com"),
+    "yeah": MailProviderPreset("yeah", "Yeah", "imap.yeah.net"),
+    "gmail": MailProviderPreset("gmail", "Gmail", "imap.gmail.com"),
+    "outlook": MailProviderPreset("outlook", "Outlook", "outlook.office365.com"),
+    "custom": MailProviderPreset("custom", "Custom", ""),
+}
+
+# Keep the descriptive alias available to callers that prefer the full name.
+EMAIL_PROVIDER_PRESETS = MAIL_PROVIDER_PRESETS
+MAIL_PROVIDERS = MAIL_PROVIDER_PRESETS
+
+_MAIL_PROVIDER_ALIASES = {
+    "qq邮箱": "qq",
+    "qqmail": "qq",
+    "网易163": "163",
+    "netease163": "163",
+    "网易126": "126",
+    "netease126": "126",
+    "outlook.com": "outlook",
+    "office365": "outlook",
+    "office 365": "outlook",
+}
+_MAIL_HOST_PROVIDER = {
+    preset.host.casefold(): key
+    for key, preset in MAIL_PROVIDER_PRESETS.items()
+    if key != "custom" and preset.host
+}
+# Outlook has had both hostnames in common use. Recognize the older one when
+# loading a config while using the current Office 365 hostname for new presets.
+_MAIL_HOST_PROVIDER["imap-mail.outlook.com"] = "outlook"
+
+
+def normalize_mail_provider(value: object) -> str:
+    """Return a supported provider key, falling back to ``custom``."""
+
+    candidate = str(value or "").strip().casefold()
+    candidate = _MAIL_PROVIDER_ALIASES.get(candidate, candidate)
+    return candidate if candidate in MAIL_PROVIDER_PRESETS else "custom"
+
+
+def infer_mail_provider(host: str | None) -> str:
+    """Infer a built-in provider from an IMAP hostname when possible."""
+
+    return _MAIL_HOST_PROVIDER.get(str(host or "").strip().casefold(), "custom")
+
+
+def mail_provider_preset(provider: object) -> MailProviderPreset:
+    """Return the preset for a key, using Custom for unknown values."""
+
+    return MAIL_PROVIDER_PRESETS[normalize_mail_provider(provider)]
+
+
+def _coerce_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"false", "0", "no", "off", ""}:
+            return False
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+    return bool(value)
+
+
+def _coerce_mail_port(
+    value: object,
+    fallback: int = 993,
+    *,
+    strict: bool = False,
+) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        if strict:
+            raise ValueError("IMAP端口必须是 1 到 65535 之间的整数。") from None
+        port = fallback
+    if not 1 <= port <= 65535:
+        raise ValueError("IMAP端口必须在 1 到 65535 之间。")
+    return port
+
+
+@dataclass(frozen=True)
 class Settings:
+    mail_provider: str = "qq"
     mail_host: str = "imap.qq.com"
     mail_port: int = 993
+    mail_ssl: bool = True
     mail_folder: str = "INBOX"
     lookback_days: int = 3
     poll_minutes: int = 10
@@ -63,6 +160,22 @@ class Settings:
     updates_enabled: bool = True
     update_channel: str = "preview"
 
+    @property
+    def provider(self) -> str:
+        """Compatibility alias for callers using the shorter field name."""
+
+        return self.mail_provider
+
+    @property
+    def ssl(self) -> bool:
+        """Compatibility alias for the persisted IMAP SSL setting."""
+
+        return self.mail_ssl
+
+    @property
+    def use_ssl(self) -> bool:
+        return self.mail_ssl
+
 
 def ensure_directories() -> None:
     for path in (
@@ -83,8 +196,10 @@ def _default_config_text() -> str:
     output = str(DEFAULT_OBSIDIAN_OUTPUT).replace("\\", "\\\\")
     queue = str(RESEARCH_QUEUE).replace("\\", "\\\\")
     return f"""[mail]
+provider = "qq"
 host = "imap.qq.com"
 port = 993
+ssl = true
 folder = "INBOX"
 lookback_days = 3
 poll_minutes = 10
@@ -144,9 +259,19 @@ def load_settings(path: Path | None = None) -> Settings:
     update_channel = str(updates.get("channel", "preview"))
     if update_channel not in {"stable", "preview"}:
         update_channel = "preview"
+    host_value = mail.get("host")
+    mail_host = str(host_value if host_value is not None else "imap.qq.com").strip()
+    provider_value = mail.get("provider", mail.get("mail_provider"))
+    mail_provider = (
+        infer_mail_provider(mail_host)
+        if provider_value is None
+        else normalize_mail_provider(provider_value)
+    )
     return Settings(
-        mail_host=str(mail.get("host", "imap.qq.com")),
-        mail_port=int(mail.get("port", 993)),
+        mail_provider=mail_provider,
+        mail_host=mail_host,
+        mail_port=_coerce_mail_port(mail.get("port", 993)),
+        mail_ssl=_coerce_bool(mail.get("ssl", mail.get("mail_ssl", True)), True),
         mail_folder=str(mail.get("folder", "INBOX")),
         lookback_days=int(mail.get("lookback_days", 3)),
         poll_minutes=max(1, int(mail.get("poll_minutes", 10))),
@@ -190,8 +315,10 @@ def write_settings(settings: Settings, path: Path = CONFIG_PATH) -> Path:
     digests = ", ".join(f'"{item}"' for item in settings.digest_times)
     source = _toml_string(settings.progress_source or "")
     text = f'''[mail]
+provider = "{_toml_string(normalize_mail_provider(settings.mail_provider))}"
 host = "{_toml_string(settings.mail_host)}"
 port = {settings.mail_port}
+ssl = {str(settings.mail_ssl).lower()}
 folder = "{_toml_string(settings.mail_folder)}"
 lookback_days = {settings.lookback_days}
 poll_minutes = {settings.poll_minutes}
@@ -236,6 +363,54 @@ def settings_from_payload(
     current: Settings,
     payload: dict[str, object],
 ) -> Settings:
+    provider_key = next(
+        (key for key in ("mail_provider", "provider") if key in payload),
+        None,
+    )
+    host_key = next(
+        (key for key in ("mail_host", "host") if key in payload),
+        None,
+    )
+    port_key = next(
+        (key for key in ("mail_port", "port") if key in payload),
+        None,
+    )
+    ssl_key = next(
+        (key for key in ("mail_ssl", "ssl", "use_ssl") if key in payload),
+        None,
+    )
+    provider = (
+        normalize_mail_provider(payload[provider_key])
+        if provider_key is not None
+        else (
+            infer_mail_provider(str(payload[host_key]))
+            if host_key is not None
+            else current.mail_provider
+        )
+    )
+    if host_key is None:
+        host = current.mail_host
+        if provider_key is not None and provider != "custom":
+            host = mail_provider_preset(provider).host
+    else:
+        host = str(payload[host_key] or "").strip()
+    if not host:
+        raise ValueError("IMAP主机不能为空。")
+    if port_key is None:
+        port = current.mail_port
+        if provider_key is not None and provider != "custom":
+            port = mail_provider_preset(provider).port
+    else:
+        port = _coerce_mail_port(payload[port_key], current.mail_port, strict=True)
+    mail_ssl = (
+        _coerce_bool(payload[ssl_key], current.mail_ssl)
+        if ssl_key is not None
+        else (
+            mail_provider_preset(provider).ssl
+            if provider_key is not None and provider != "custom"
+            else current.mail_ssl
+        )
+    )
     poll_minutes = max(5, min(120, int(payload.get("poll_minutes") or 10)))
     lookback_days = max(1, min(30, int(payload.get("lookback_days") or 3)))
     obsidian_output = Path(
@@ -252,6 +427,10 @@ def settings_from_payload(
         raise ValueError("更新通道必须是 stable 或 preview。")
     return replace(
         current,
+        mail_provider=provider,
+        mail_host=host,
+        mail_port=port,
+        mail_ssl=mail_ssl,
         poll_minutes=poll_minutes,
         lookback_days=lookback_days,
         obsidian_enabled=bool(payload.get("obsidian_enabled", False)),

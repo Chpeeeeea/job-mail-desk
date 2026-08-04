@@ -246,7 +246,13 @@ class DesktopApi:
         return {
             "credential_configured": credential_configured,
             "email": email,
+            "mail_provider": self._settings.mail_provider,
+            "provider": self._settings.mail_provider,
             "mail_host": self._settings.mail_host,
+            "mail_port": self._settings.mail_port,
+            "mail_ssl": self._settings.mail_ssl,
+            "ssl": self._settings.mail_ssl,
+            "use_ssl": self._settings.mail_ssl,
             "poll_minutes": self._settings.poll_minutes,
             "lookback_days": self._settings.lookback_days,
             "obsidian_enabled": self._settings.obsidian_enabled,
