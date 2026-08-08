@@ -64,6 +64,10 @@ def _parser() -> argparse.ArgumentParser:
     digest.add_argument("period", choices=("morning", "noon", "evening"))
     export = subparsers.add_parser("export", help="导出 Markdown 总览")
     export.add_argument("--obsidian", action="store_true")
+    subparsers.add_parser(
+        "sync-ledger",
+        help="读取岗位投递决策台账并刷新本地卡片，不扫描邮箱",
+    )
     subparsers.add_parser("research-queue", help="查看待处理研究请求")
     subparsers.add_parser(
         "application-preview",
@@ -198,6 +202,14 @@ def main(argv: list[str] | None = None) -> int:
                 source_path=settings.progress_source,
             )
         print(target)
+        return 0
+    if args.command == "sync-ledger":
+        if settings.progress_source:
+            ApplicationRegistry(APPLICATIONS_DIR).import_progress(
+                settings.progress_source
+            )
+        store = MarkdownTaskStore(TASKS_DIR)
+        print(json.dumps(sync_outputs(settings, store), ensure_ascii=False, indent=2))
         return 0
     if args.command == "research-queue":
         print(

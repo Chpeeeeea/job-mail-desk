@@ -38,13 +38,16 @@ from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
 
 from . import __version__
+from .application_registry import ApplicationRegistry
 from .config import (
+    APPLICATIONS_DIR,
     CONFIG_PATH,
     DASHBOARD_FILE,
     DICTIONARIES_DIR,
     IMPORTED_DICTIONARIES_DIR,
     STATE_DB,
     TASKS_DIR,
+    UNRESOLVED_DIR,
     Settings,
     settings_from_payload,
     write_settings,
@@ -56,13 +59,15 @@ from .identity_dictionaries import load_identity_dictionaries
 from .mail_reader import ImapReader
 from .dashboard import cached_dashboard_payload
 from .markdown_store import MarkdownTaskStore
+from .models import ParsedEvent
 from .research import request_states
 from .progress import create_progress_template
 from .scanner import scan_once
 from .scheduler import create_background_scheduler
 from .state import StateStore
-from .task_service import create_manual_task
+from .task_service import create_manual_task, legacy_application_id, task_from_event
 from .updates import UpdateManager
+from .unresolved_store import UnresolvedStore
 
 
 def _resource(name: str) -> Path:
@@ -457,6 +462,75 @@ class DesktopApi:
             return {"status": "ok", "summary": scan_once(self._settings).to_dict()}
         finally:
             self._scan_lock.release()
+
+    def sync_ledger(self) -> dict[str, object]:
+        """Import the user-edited ledger and refresh local Markdown outputs."""
+        if self._settings.progress_source:
+            ApplicationRegistry(APPLICATIONS_DIR).import_progress(
+                self._settings.progress_source
+            )
+        self._export(MarkdownTaskStore(TASKS_DIR))
+        return {"status": "ok", "dashboard": self.get_dashboard()}
+
+    def ignore_unresolved(self, source_hash: str) -> dict[str, object]:
+        UnresolvedStore(UNRESOLVED_DIR).ignore(source_hash)
+        return self.get_dashboard()
+
+    def resolve_unresolved(
+        self,
+        source_hash: str,
+        application_key: str,
+    ) -> dict[str, object]:
+        unresolved_store = UnresolvedStore(UNRESOLVED_DIR)
+        record = unresolved_store.load(source_hash)
+        if not record or record.status != "pending":
+            raise ValueError("待归属记录不存在或已经处理。")
+        application = ApplicationRegistry(APPLICATIONS_DIR).load(application_key)
+        if not application:
+            raise ValueError("申请身份不存在，请先在台账中确认该申请。")
+        legacy_ids = set(application.legacy_application_ids)
+        if len(legacy_ids) > 1:
+            raise ValueError("申请包含多个旧 ID，必须先人工消除冲突。")
+        legacy_id = next(iter(legacy_ids), legacy_application_id(application_key))
+        if legacy_id not in application.legacy_application_ids:
+            application.legacy_application_ids.append(legacy_id)
+            ApplicationRegistry(APPLICATIONS_DIR).save(application)
+        event = ParsedEvent(
+            company=record.company,
+            role=record.role,
+            recruiting_project=record.recruiting_project,
+            event_type=record.event_type,
+            stage=record.stage,
+            round=record.round,
+            title=record.title,
+            start_at=record.start_at,
+            end_at=record.end_at,
+            deadline_at=record.deadline_at,
+            source_message_id=f"unresolved:{record.id}",
+            source_received_at=record.received_at,
+            source_sender="",
+            source_url=None,
+            action_summary=record.action_summary,
+            requirements=record.requirements,
+            matched_keywords=(),
+            confidence=record.confidence,
+            change_type=record.change_type,  # type: ignore[arg-type]
+        )
+        store = MarkdownTaskStore(TASKS_DIR)
+        task = task_from_event(
+            event,
+            store,
+            application_key=application.application_key,
+            resolved_application_id=legacy_id,
+        )
+        store.save(task)
+        unresolved_store.resolve(
+            record.id,
+            application_key=application.application_key,
+            task_id=task.id,
+        )
+        self._export(store)
+        return self.get_dashboard()
 
     def open_source(self, task_id: str) -> bool:
         task = MarkdownTaskStore(TASKS_DIR).load(task_id)

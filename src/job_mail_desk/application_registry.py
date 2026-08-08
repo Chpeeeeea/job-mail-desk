@@ -152,7 +152,7 @@ def application_from_progress_entry(
     )
     ended = any(
         label in (entry.get("status") or "")
-        for label in ("已结束", "未通过", "撤回", "关闭", "已过期")
+        for label in ("已结束", "未通过", "撤回", "关闭", "已过期", "已归档")
     )
     return ApplicationRecord(
         application_key=key,
@@ -308,11 +308,14 @@ class ApplicationRegistry:
         for candidate in preview_progress_applications(path):
             existing = self.load(candidate.application_key)
             if existing and existing.identity_locked:
-                existing.status = (
-                    "ended"
-                    if candidate.status == "ended"
-                    else existing.status
-                )
+                existing.company_key = candidate.company_key
+                existing.company = candidate.company
+                existing.recruiting_project = candidate.recruiting_project
+                existing.recruiting_year = candidate.recruiting_year
+                existing.business_unit = candidate.business_unit
+                existing.role = candidate.role
+                existing.job_code = candidate.job_code
+                existing.status = candidate.status
                 if candidate.submitted_at and (
                     not existing.submitted_at
                     or candidate.submitted_at < existing.submitted_at

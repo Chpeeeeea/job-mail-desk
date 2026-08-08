@@ -71,7 +71,10 @@ def _bucket(task: JobTask, now: datetime) -> str:
         return "urgent"
     delta = target.astimezone(SHANGHAI) - now
     if delta < timedelta(0):
-        return "expired"
+        # Keep a scheduled item visible until the scanner has explicitly
+        # transitioned it to ``expired``; this prevents a missed scan from
+        # silently dropping a still-reviewable item during export.
+        return "review" if task.status in {"planned", "confirmed"} else "expired"
     if delta <= timedelta(hours=24):
         return "urgent"
     if delta <= timedelta(days=7):
@@ -166,7 +169,12 @@ def export_dashboard(
             critical_time(item) or item.received_at,
         ),
     ):
-        buckets[_bucket(task, current)].append(task)
+        bucket = _bucket(task, current)
+        # A task can cross its deadline between scheduler runs. Keep it
+        # out of actionable Markdown until the scanner marks it expired;
+        # never let that transient state break export.
+        if bucket in buckets:
+            buckets[bucket].append(task)
     lines = [MANAGED_START, ""]
     for key, title in (
         ("urgent", "紧急：24 小时内"),

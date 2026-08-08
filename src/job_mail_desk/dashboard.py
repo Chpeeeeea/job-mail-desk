@@ -4,7 +4,15 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 
-from .config import DASHBOARD_CACHE, RESEARCH_QUEUE, STATE_DB, TASKS_DIR
+from .application_registry import ApplicationRegistry
+from .config import (
+    APPLICATIONS_DIR,
+    DASHBOARD_CACHE,
+    RESEARCH_QUEUE,
+    STATE_DB,
+    TASKS_DIR,
+    UNRESOLVED_DIR,
+)
 from .markdown_store import MarkdownTaskStore, _atomic_write
 from .models import JobTask
 from .parser import SHANGHAI
@@ -12,9 +20,10 @@ from .progress import progress_payload
 from .research import request_states
 from .state import StateStore
 from .task_service import critical_time
+from .unresolved_store import UnresolvedStore
 
 
-DASHBOARD_CACHE_SCHEMA = 3
+DASHBOARD_CACHE_SCHEMA = 4
 
 
 def _view(task: JobTask, now: datetime) -> str:
@@ -116,6 +125,54 @@ def dashboard_payload(
     states = request_states(research_queue)
     payload = [_task_payload(task, now, states.get(task.id)) for task in tasks]
     progress = progress_payload(all_tasks, progress_source)
+    application_views: dict[str, dict[str, object]] = {}
+    for application in progress:
+        for key in (
+            application.get("application_id"),
+            application.get("application_key"),
+            application.get("legacy_application_id"),
+        ):
+            if key:
+                application_views[str(key)] = application
+    for item in payload:
+        application = application_views.get(str(item.get("application_key") or ""))
+        if not application:
+            application = application_views.get(str(item.get("application_id") or ""))
+        if not application:
+            continue
+        item["company"] = application.get("company") or item["company"]
+        item["role"] = application.get("role") or item["role"]
+        if application.get("active") is False:
+            item["view"] = "progress"
+            item["actionable"] = False
+    registry = ApplicationRegistry(APPLICATIONS_DIR)
+    unresolved: list[dict[str, object]] = []
+    for record in UnresolvedStore(UNRESOLVED_DIR).all():
+        if record.status != "pending":
+            continue
+        candidates = []
+        for key in record.candidate_application_keys:
+            application = registry.load(key)
+            if application:
+                candidates.append(
+                    {
+                        "application_key": key,
+                        "company": application.company,
+                        "role": application.role or "岗位待确认",
+                    }
+                )
+        target = record.deadline_at or record.end_at or record.start_at
+        unresolved.append(
+            {
+                **record.to_dict(),
+                "attention_type": "unresolved_identity",
+                "candidates": candidates,
+                "time": target.isoformat() if target else None,
+                "time_label": target.astimezone(SHANGHAI).strftime("%m-%d %H:%M")
+                if target
+                else "时间待确认",
+            }
+        )
     payload.sort(
         key=lambda item: (
             item["status"] == "done",
@@ -126,6 +183,7 @@ def dashboard_payload(
     return {
         "generated_at": now.isoformat(),
         "tasks": payload,
+        "unresolved": unresolved,
         "progress": progress,
         "counts": {
             "today": sum(
@@ -139,7 +197,7 @@ def dashboard_payload(
             "review": sum(
                 item["view"] == "review" and item["status"] != "done"
                 for item in payload
-            ),
+            ) + len(unresolved),
             "list": sum(
                 item["status"] != "done" and bool(item["actionable"])
                 for item in payload
@@ -160,6 +218,7 @@ def _source_signature(
     progress_source: Path | None,
 ) -> list[list[object]]:
     paths = list(sorted(TASKS_DIR.glob("*.md")))
+    paths.extend(sorted(UNRESOLVED_DIR.glob("*.md")))
     paths.extend([research_queue, STATE_DB])
     if progress_source:
         paths.append(progress_source)

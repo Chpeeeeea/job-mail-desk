@@ -373,6 +373,86 @@ async function handleAction(task, action) {
   render();
 }
 
+function unresolvedMatches(record, filter) {
+  if (filter === "recent") {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return new Date(record.received_at).getTime() >= cutoff;
+  }
+  if (filter === "application") return record.event_type === "application";
+  if (filter === "assessment") return /测评|笔试|作答/.test(record.stage || "");
+  if (filter === "interview") return /面试/.test(record.stage || "");
+  return true;
+}
+
+async function handleUnresolved(record, action, applicationKey = "") {
+  if (!apiReady()) return;
+  if (action === "ignore") {
+    state.payload = await window.pywebview.api.ignore_unresolved(record.id);
+  } else if (action === "resolve" && applicationKey) {
+    state.payload = await window.pywebview.api.resolve_unresolved(
+      record.id,
+      applicationKey,
+    );
+  }
+  render();
+}
+
+function unresolvedCard(record) {
+  const card = document.createElement("article");
+  card.className = "task-card unresolved-card";
+  card.dataset.priority = "high";
+  card.innerHTML = `
+    <div class="card-head">
+      <div><div class="company">${escapeHtml(record.company || "公司待确认")}</div>
+      <div class="role">${escapeHtml(record.role || "岗位待确认")}</div></div>
+      <div class="time-box"><div class="time-label">待归属</div>
+      <div class="remaining">${escapeHtml(record.time_label || "时间待确认")}</div></div>
+    </div>
+    <div class="meta"><span class="stage">${escapeHtml(record.stage || "招聘通知")}</span>
+      <span class="round">身份需要确认</span></div>
+    <p class="action">${escapeHtml(record.action_summary || record.title || "请确认这封邮件属于哪条申请链")}</p>
+    <div class="unresolved-candidates"></div>
+    <div class="actions"><button data-unresolved-ignore="1" class="muted">忽略</button></div>
+  `;
+  const candidateBox = card.querySelector(".unresolved-candidates");
+  const candidates = (record.candidates || []).map((candidate) => {
+    const button = document.createElement("button");
+    button.className = "secondary-action";
+    button.type = "button";
+    button.textContent = `${candidate.company}｜${candidate.role}`;
+    button.title = "将邮件归入这条申请链";
+    button.addEventListener("click", () =>
+      handleUnresolved(record, "resolve", candidate.application_key),
+    );
+    return button;
+  });
+  if (candidates.length) {
+    const label = document.createElement("small");
+    label.textContent = "归入申请链：";
+    candidateBox.append(label, ...candidates);
+  } else {
+    candidateBox.textContent = "请先在求职进展台账中确认申请身份，刷新后再归属。";
+  }
+  const ignore = card.querySelector("[data-unresolved-ignore]");
+  ignore.addEventListener("click", () => {
+    if (ignore.dataset.armed === "1") {
+      handleUnresolved(record, "ignore");
+      return;
+    }
+    ignore.dataset.armed = "1";
+    ignore.textContent = "再点确认";
+    setTimeout(() => {
+      delete ignore.dataset.armed;
+      ignore.textContent = "忽略";
+    }, 3000);
+  });
+  return card;
+}
+
+function renderUnresolvedCards(records) {
+  records.forEach((record) => cards.append(unresolvedCard(record)));
+}
+
 function renderCards() {
   cards.replaceChildren();
   if (state.view === "progress") {
@@ -390,17 +470,22 @@ function renderCards() {
   let tasks = state.view === "list"
     ? state.payload.tasks.filter((task) => task.actionable)
     : state.payload.tasks.filter((task) => task.view === state.view);
+  let unresolved = [];
   if (state.view === "review") {
     renderReviewFilterBar(tasks);
     tasks = filterReviewTasks(tasks, state.reviewFilter);
+    unresolved = (state.payload.unresolved || []).filter((record) =>
+      unresolvedMatches(record, state.reviewFilter),
+    );
   }
-  if (!tasks.length) {
+  if (!tasks.length && !unresolved.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = "这一栏暂时没有任务。";
     cards.append(empty);
     return;
   }
+  if (state.view === "review") renderUnresolvedCards(unresolved);
   for (const task of tasks) {
     const node = template.content.firstElementChild.cloneNode(true);
     node.dataset.priority = task.priority;
@@ -494,7 +579,10 @@ function renderReviewFilterBar(tasks) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = key === state.reviewFilter ? "active" : "";
-    button.textContent = `${label} ${filterReviewTasks(tasks, key).length}`;
+    const unresolvedCount = (state.payload.unresolved || []).filter((record) =>
+      unresolvedMatches(record, key),
+    ).length;
+    button.textContent = `${label} ${filterReviewTasks(tasks, key).length + unresolvedCount}`;
     button.addEventListener("click", () => {
       state.reviewFilter = key;
       renderCards();
@@ -585,6 +673,7 @@ function renderProgress() {
           <span>${escapeHtml(application.status_label)}</span>
         </div>
         <div class="progress-current">当前：${escapeHtml(application.current_stage)}${escapeHtml(currentRound)}</div>
+        ${application.current_action ? `<p class="progress-action">下一步：${escapeHtml(application.current_action)}</p>` : ""}
         <div class="progress-timeline"></div>
       `;
       const timeline = card.querySelector(".progress-timeline");
@@ -973,8 +1062,26 @@ async function scanMailbox(button, idleText) {
   }
 }
 
+async function syncLedger(button, idleText) {
+  if (!apiReady() || button.disabled) return;
+  button.disabled = true;
+  button.textContent = "…";
+  try {
+    const result = await window.pywebview.api.sync_ledger();
+    if (result?.dashboard) state.payload = result.dashboard;
+    initializeCalendarAnchor();
+    render();
+  } finally {
+    button.disabled = false;
+    button.textContent = idleText;
+  }
+}
+
 document.querySelector("#refreshButton").addEventListener("click", (event) => {
   scanMailbox(event.currentTarget, "扫描邮箱");
+});
+document.querySelector("#ledgerButton").addEventListener("click", (event) => {
+  syncLedger(event.currentTarget, "同步台账");
 });
 document.querySelector("#addButton").addEventListener("click", () => showTaskDialog());
 document.querySelector("#settingsButton").addEventListener("click", () => showSettingsDialog(false));

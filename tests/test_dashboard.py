@@ -4,6 +4,7 @@ import job_mail_desk.dashboard as dashboard
 from job_mail_desk.markdown_store import MarkdownTaskStore
 from job_mail_desk.models import JobTask
 from job_mail_desk.parser import SHANGHAI
+from job_mail_desk.unresolved_store import UnresolvedRecord, UnresolvedStore
 
 
 def test_completed_task_stays_in_dashboard_and_active_count_excludes_it(
@@ -166,3 +167,91 @@ def test_expired_task_is_hidden_from_action_views_but_kept_in_progress(
     assert payload["tasks"] == []
     assert payload["counts"]["list"] == 0
     assert payload["progress"][0]["current_stage"] == "在线笔试"
+
+
+def test_unresolved_items_share_the_review_count(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(dashboard, "TASKS_DIR", tmp_path / "tasks")
+    monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
+    monkeypatch.setattr(dashboard, "UNRESOLVED_DIR", tmp_path / "unresolved")
+    monkeypatch.setattr(dashboard, "APPLICATIONS_DIR", tmp_path / "applications")
+    record = UnresolvedRecord(
+        id="a" * 32,
+        status="pending",
+        resolution_status="unresolved",
+        reason="multiple-candidates",
+        company="样例公司",
+        role=None,
+        recruiting_project=None,
+        event_type="assessment",
+        stage="在线笔试",
+        round=None,
+        received_at=datetime(2026, 8, 8, 8, 0, tzinfo=SHANGHAI),
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        action_summary="确认申请归属",
+        title="笔试通知",
+        requirements=(),
+        confidence=0.8,
+        change_type="new",
+        candidate_application_keys=(),
+        resolved_application_key=None,
+        resolved_task_id=None,
+        rule_version="identity-registry-v1",
+    )
+    UnresolvedStore(tmp_path / "unresolved").save(record)
+
+    payload = dashboard.dashboard_payload(tmp_path / "research.jsonl")
+    assert payload["counts"]["review"] == 1
+    assert payload["unresolved"][0]["attention_type"] == "unresolved_identity"
+
+
+def test_terminal_ledger_status_removes_task_from_action_views(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    store = MarkdownTaskStore(tasks_dir)
+    task = JobTask(
+        id="c" * 24,
+        application_id="d" * 20,
+        application_key="app-1234567890abcdef1234",
+        company="旧企业",
+        role="旧岗位",
+        recruiting_project=None,
+        event_type="interview",
+        stage="面试",
+        round=None,
+        received_at=datetime(2026, 8, 8, 8, 0, tzinfo=SHANGHAI),
+        start_at=datetime(2026, 8, 9, 14, 0, tzinfo=SHANGHAI),
+        end_at=None,
+        deadline_at=None,
+        priority="high",
+        status="planned",
+        change_type="new",
+        source_message_hash="e" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="面试通知",
+        action_summary="参加面试",
+    )
+    store.save(task)
+    ledger = tmp_path / "台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 新企业｜新岗位｜**未通过**｜停止跟进 <!-- jobmaildesk:application:app-1234567890abcdef1234 -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dashboard, "TASKS_DIR", tasks_dir)
+    monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
+    monkeypatch.setattr(dashboard, "UNRESOLVED_DIR", tmp_path / "unresolved")
+    monkeypatch.setattr(dashboard, "APPLICATIONS_DIR", tmp_path / "applications")
+
+    payload = dashboard.dashboard_payload(tmp_path / "research.jsonl", ledger)
+    assert payload["tasks"][0]["company"] == "新企业"
+    assert payload["tasks"][0]["role"] == "新岗位"
+    assert payload["tasks"][0]["view"] == "progress"
+    assert payload["tasks"][0]["actionable"] is False
+    assert payload["counts"]["today"] == 0

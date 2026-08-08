@@ -399,6 +399,35 @@ body.capsule .capsule-view {
   color: var(--muted);
 }
 
+.unresolved-card {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--paper));
+}
+
+.unresolved-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.secondary-action {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--ink);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.secondary-action:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
 .actions button.confirming,
 .calendar-event button.confirming {
   background: var(--accent);
@@ -655,6 +684,13 @@ dialog::backdrop {
   margin: 8px 0 7px;
   font-size: 11px;
   font-weight: 700;
+}
+
+.progress-action {
+  margin: -2px 0 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .progress-timeline {

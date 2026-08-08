@@ -165,6 +165,50 @@ def test_netease_business_unit_ledger_merges_with_parent_company_task(tmp_path) 
     assert applications[0]["ledger_status"] == "已完成投递，等待筛选"
 
 
+def test_ended_ledger_result_overrides_stale_mail_stage(tmp_path) -> None:
+    assessment = task("result", "人才测评", "done", 12)
+    assessment.company = "科大讯飞"
+    assessment.role = "AI产品经理"
+    assessment.application_key = "app-iflytek"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 科大讯飞｜AI 产品经理（J13348）｜**2026-08-05 未通过（简历筛选未通过）**｜简历挂，停止跟进 <!-- jobmaildesk:application:app-iflytek -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    applications = progress_payload([assessment], ledger)
+    assert len(applications) == 1
+    assert applications[0]["current_stage"] == "2026-08-05 未通过（简历筛选未通过）"
+    assert applications[0]["current_status"] == "done"
+    assert applications[0]["status_label"] == "2026-08-05 未通过（简历筛选未通过）"
+    assert applications[0]["active"] is False
+    assert applications[0]["next_time"] is None
+    assert applications[0]["history"][0]["stage"] == "人才测评"
+
+
+def test_user_ledger_fields_override_progress_card_with_stable_id(tmp_path) -> None:
+    interview = task("edit", "AI 面试", "planned", 14)
+    interview.company = "旧企业名"
+    interview.role = "旧岗位名"
+    interview.application_key = "app-1234567890abcdef1234"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [ ] OPPO｜AI 产品经理｜**群面已安排**｜准备群面案例 <!-- jobmaildesk:application:app-1234567890abcdef1234 -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+
+    application = progress_payload([interview], ledger)[0]
+    assert application["company"] == "OPPO"
+    assert application["role"] == "AI 产品经理"
+    assert application["current_stage"] == "群面已安排"
+    assert application["current_action"] == "准备群面案例"
+
+
 def test_progress_ignores_instruction_text_when_selecting_role() -> None:
     correct = task("c", "网申", "done", 10)
     correct.company = "网易游戏"

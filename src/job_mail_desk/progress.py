@@ -51,10 +51,14 @@ updated: {today}
 
 > 每行使用：公司｜岗位｜当前进展｜下一步动作。JobMailDesk只读取下方“已投递或已进入流程”区域。
 > 当公司和岗位能够唯一匹配时，组件完成任务会更新“当前进展”并在行尾写入稳定申请 ID；不会覆盖下一步动作和其他手写区域。
+> 保存后点击组件“同步台账”，即可让申请卡片读取这里的修改；不要手动编辑 [[求职当前进展]] 的自动生成区。
 
 ## 当前进展
 
 ### 已投递或已进入流程
+
+> 受控格式：公司｜岗位｜**当前进展**｜下一步动作 `<!-- jobmaildesk:application:稳定申请ID -->`
+> 已有稳定 ID 的行可直接修改公司、岗位、当前进展和下一步；需要隐藏申请时请把当前进展改为“已归档”。
 
 <!-- 示例：- [x] 示例公司｜产品经理｜**一面已确认**｜8月6日14:00参加面试；首次成功同步后，程序会在行尾加入稳定申请 ID。 -->
 
@@ -68,6 +72,22 @@ updated: {today}
 - 当前进展建议使用：已投递、测评、笔试、一面、二面、群面、Offer、未通过、已结束。
 - 已完成节点建议保留日期，例如：`2026-08-03 人才测评已完成，等待后续`；截止时间与完成时间必须分开。
 - 同一岗位进展变化时更新原行，不要重复追加相同岗位。
+
+## 可编辑字段
+
+| 字段 | 写法 | 组件行为 |
+| --- | --- | --- |
+| 公司 | 企业标准名 | 更新申请身份；事业群仍需写在岗位或项目中 |
+| 岗位 | 精确岗位名/岗位编号 | 更新申请链岗位，不与同公司其他岗位合并 |
+| 当前进展 | 已投递、测评、笔试、面试、群面、Offer、未通过、已结束 | 更新当前阶段；终止类状态停止提醒 |
+| 下一步动作 | 简短可执行句子 | 更新卡片行动摘要 |
+| 复选框 | `[x]` 已投递/已确认，`[ ]` 待处理 | 不覆盖历史节点完成状态 |
+
+## 归档规则
+
+- 想隐藏一条申请时，把当前进展改为 `已归档`，再点击“同步台账”。
+- 组件保留本地任务历史，避免旧邮件重新制造重复申请链。
+- 直接删除台账行不会删除本地任务；没有稳定 ID 的行会进入“待归属”，等待人工选择。
 """
     _atomic_write(path, content)
     return True
@@ -450,8 +470,42 @@ def progress_payload(
         ]
         if task_matches:
             for application in task_matches:
+                # The user-maintained ledger is the editable control plane for
+                # application identity and current progress. Stable markers
+                # make these overrides deterministic without rewriting task
+                # history.
+                application["company"] = entry["company"] or application["company"]
+                application["role"] = entry["role"] or application["role"]
+                if entry["project"] and not application["project"]:
+                    application["project"] = entry["project"]
                 application["ledger_status"] = entry["status"]
                 application["ledger_action"] = entry["action"]
+                # 人工台账是申请结果的权威来源。邮件链可能停留在“测评已完成”
+                # 等历史节点；当台账明确写出未通过、应聘终止或已结束时，
+                # 当前卡片必须展示终止结果，但保留原有 history 供复盘。
+                ledger_ended = any(
+                    label in entry["status"]
+                    for label in (
+                        "已结束",
+                        "未通过",
+                        "撤回",
+                        "关闭",
+                        "应聘终止",
+                        "已过期",
+                        "已归档",
+                    )
+                )
+                if ledger_ended:
+                    application["current_stage"] = entry["status"]
+                    application["current_status"] = "done"
+                    application["status_label"] = entry["status"]
+                    application["current_action"] = entry["action"]
+                    application["active"] = False
+                    application["next_time"] = None
+                elif entry["status"]:
+                    application["current_stage"] = entry["status"]
+                    application["status_label"] = entry["status"]
+                    application["current_action"] = entry["action"]
                 if application["role"] == "岗位待确认" and same_program(application):
                     application["role"] = entry["role"]
             continue
@@ -462,7 +516,7 @@ def progress_payload(
             continue
         ended = any(
             label in entry["status"]
-            for label in ("已结束", "未通过", "撤回", "关闭")
+            for label in ("已结束", "未通过", "撤回", "关闭", "已归档")
         )
         identifier = hashlib.sha256(
             f"ledger|{entry['company']}|{entry['role']}".encode("utf-8")

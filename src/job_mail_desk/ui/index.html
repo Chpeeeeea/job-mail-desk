@@ -38,7 +38,7 @@
       <button class="tab" data-view="progress" title="按企业查看笔试、面试与轮次进展">进展 <span id="countProgress">0</span></button>
       <button class="tab" data-view="week">周历 <span id="countWeek">0</span></button>
       <button class="tab" data-view="month">月历 <span id="countMonth">0</span></button>
-      <button class="tab" data-view="review">待确认 <span id="countReview">0</span></button>
+      <button class="tab" data-view="review" title="待归属与待补信息的统一入口">待处理 <span id="countReview">0</span></button>
       <button class="tab" data-view="list" title="全部事项；完成后保留，可再次恢复">待办 <span id="countList">0</span></button>
     </nav>
 
@@ -47,6 +47,7 @@
     <footer>
       <span id="healthDot" class="health-dot"></span>
       <span id="healthText">读取本地任务中…</span>
+      <button id="ledgerButton" class="text-button" title="读取岗位投递决策台账并刷新卡片">同步台账</button>
       <button id="refreshButton" class="text-button" title="立即扫描邮箱并刷新任务">扫描邮箱</button>
     </footer>
 
