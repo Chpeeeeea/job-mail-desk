@@ -38,7 +38,10 @@ from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
 
 from . import __version__
-from .application_registry import ApplicationRegistry
+from .application_registry import (
+    ApplicationRegistry,
+    application_from_confirmed_fields,
+)
 from .config import (
     APPLICATIONS_DIR,
     CONFIG_PATH,
@@ -476,6 +479,41 @@ class DesktopApi:
         UnresolvedStore(UNRESOLVED_DIR).ignore(source_hash)
         return self.get_dashboard()
 
+    def save_unresolved_draft(
+        self,
+        source_hash: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        UnresolvedStore(UNRESOLVED_DIR).update_draft(source_hash, payload)
+        return self.get_dashboard()
+
+    def confirm_unresolved(
+        self,
+        source_hash: str,
+        payload: dict[str, object],
+        application_key: str = "",
+    ) -> dict[str, object]:
+        unresolved_store = UnresolvedStore(UNRESOLVED_DIR)
+        record = unresolved_store.update_draft(source_hash, payload)
+        if not record.company or not record.role:
+            raise ValueError("确认入链前必须填写公司和岗位。")
+        registry = ApplicationRegistry(APPLICATIONS_DIR)
+        if application_key:
+            application = registry.load(application_key)
+            if not application:
+                raise ValueError("所选申请链不存在，请刷新后重试。")
+        else:
+            candidate = application_from_confirmed_fields(
+                company=record.company,
+                role=record.role,
+                recruiting_project=record.recruiting_project,
+                recruiting_year=record.recruiting_year,
+                job_code=record.job_code,
+            )
+            application = registry.load(candidate.application_key) or candidate
+            registry.save(application)
+        return self._materialize_unresolved(record, application.application_key)
+
     def resolve_unresolved(
         self,
         source_hash: str,
@@ -485,6 +523,14 @@ class DesktopApi:
         record = unresolved_store.load(source_hash)
         if not record or record.status != "pending":
             raise ValueError("待归属记录不存在或已经处理。")
+        return self._materialize_unresolved(record, application_key)
+
+    def _materialize_unresolved(
+        self,
+        record,
+        application_key: str,
+    ) -> dict[str, object]:
+        unresolved_store = UnresolvedStore(UNRESOLVED_DIR)
         application = ApplicationRegistry(APPLICATIONS_DIR).load(application_key)
         if not application:
             raise ValueError("申请身份不存在，请先在台账中确认该申请。")
@@ -523,6 +569,9 @@ class DesktopApi:
             application_key=application.application_key,
             resolved_application_id=legacy_id,
         )
+        if not (record.start_at or record.end_at or record.deadline_at):
+            task.status = "needs_review"
+        task.manual_notes = record.time_hint or task.manual_notes
         store.save(task)
         unresolved_store.resolve(
             record.id,

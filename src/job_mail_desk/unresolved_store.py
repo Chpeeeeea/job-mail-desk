@@ -9,6 +9,7 @@ import yaml
 
 from .identity_pipeline import IdentityDecision
 from .markdown_store import FRONTMATTER, _atomic_write
+from .parser import SHANGHAI
 from .privacy import redact_text
 
 
@@ -42,6 +43,8 @@ class UnresolvedRecord:
     resolved_task_id: str | None
     rule_version: str
     job_code: str | None = None
+    recruiting_year: int | None = None
+    time_hint: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -73,7 +76,22 @@ class UnresolvedRecord:
             "resolved_task_id": self.resolved_task_id,
             "rule_version": self.rule_version,
             "job_code": self.job_code,
+            "recruiting_year": self.recruiting_year,
+            "time_hint": self.time_hint,
         }
+
+
+def _time_hint(values: tuple[str, ...]) -> str | None:
+    for value in values:
+        match = re.search(
+            r"(?:预计|计划|暂定|拟定|大约|约|统一).{0,30}?"
+            r"(?:20\d{2}年)?\d{1,2}月[^。；;]{0,24}|"
+            r"(?:20\d{2}年)?\d{1,2}月[^。；;]{0,24}?(?:预计|启动|开始|进行)",
+            value,
+        )
+        if match:
+            return _private_safe(match.group(0))[:120] or None
+    return None
 
 
 def unresolved_from_decision(
@@ -116,6 +134,8 @@ def unresolved_from_decision(
         resolved_task_id=None,
         rule_version=decision.resolution.rule_version,
         job_code=candidate.job_code,
+        recruiting_year=candidate.recruiting_year,
+        time_hint=_time_hint((event.action_summary, *event.requirements, event.title)),
     )
 
 
@@ -158,8 +178,72 @@ class UnresolvedStore:
 
     def save(self, record: UnresolvedRecord) -> Path:
         path = self.path_for(record.id)
+        if path.exists() and record.status == "pending":
+            existing = self.load(record.id)
+            if existing and existing.status != "pending":
+                # A replay of the same internal source identity must never
+                # reopen a record the user already resolved or ignored.
+                return path
         _atomic_write(path, render_unresolved(record))
         return path
+
+    @staticmethod
+    def _optional_text(value: object, limit: int) -> str | None:
+        cleaned = _private_safe(str(value or ""))[:limit]
+        return cleaned or None
+
+    @staticmethod
+    def _optional_time(value: object) -> datetime | None:
+        if not value:
+            return None
+        parsed = datetime.fromisoformat(str(value))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=SHANGHAI)
+        return parsed.astimezone(SHANGHAI)
+
+    def update_draft(
+        self,
+        source_hash: str,
+        payload: dict[str, object],
+    ) -> UnresolvedRecord:
+        record = self.load(source_hash)
+        if not record or record.status != "pending":
+            raise ValueError("待处理记录不存在或已经处理。")
+        year_value = payload.get("recruiting_year")
+        if year_value in {None, ""}:
+            recruiting_year = None
+        else:
+            try:
+                recruiting_year = int(str(year_value))
+            except ValueError as exc:
+                raise ValueError("招聘年份必须是四位年份。") from exc
+            if not 2000 <= recruiting_year <= 2100:
+                raise ValueError("招聘年份必须在 2000 到 2100 之间。")
+        start_at = self._optional_time(payload.get("start_at"))
+        end_at = self._optional_time(payload.get("end_at"))
+        deadline_at = self._optional_time(payload.get("deadline_at"))
+        if start_at and end_at and end_at <= start_at:
+            raise ValueError("结束时间必须晚于开始时间。")
+        updated = replace(
+            record,
+            company=self._optional_text(payload.get("company"), 80),
+            role=self._optional_text(payload.get("role"), 80),
+            recruiting_project=self._optional_text(
+                payload.get("recruiting_project"), 100
+            ),
+            recruiting_year=recruiting_year,
+            stage=self._optional_text(payload.get("stage"), 40) or "招聘通知",
+            round=self._optional_text(payload.get("round"), 30),
+            start_at=start_at,
+            end_at=end_at,
+            deadline_at=deadline_at,
+            time_hint=self._optional_text(payload.get("time_hint"), 240),
+            action_summary=(
+                self._optional_text(payload.get("action_summary"), 240) or ""
+            ),
+        )
+        self.save(updated)
+        return updated
 
     def load(self, source_hash: str) -> UnresolvedRecord | None:
         return next((item for item in self.all() if item.id == source_hash), None)
@@ -265,6 +349,16 @@ class UnresolvedStore:
                     job_code=(
                         str(payload["job_code"])
                         if payload.get("job_code")
+                        else None
+                    ),
+                    recruiting_year=(
+                        int(payload["recruiting_year"])
+                        if payload.get("recruiting_year")
+                        else None
+                    ),
+                    time_hint=(
+                        str(payload["time_hint"])
+                        if payload.get("time_hint")
                         else None
                     ),
                 )

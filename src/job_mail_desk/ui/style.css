@@ -404,6 +404,59 @@ body.capsule .capsule-view {
   background: color-mix(in srgb, var(--accent-soft) 55%, var(--paper));
 }
 
+.unresolved-context {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.unresolved-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.unresolved-fields label,
+.unresolved-confirm label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.unresolved-fields .wide {
+  grid-column: 1 / -1;
+}
+
+.unresolved-fields input,
+.unresolved-fields textarea,
+.unresolved-confirm select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.unresolved-confirm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.unresolved-status.error {
+  display: block;
+  margin-top: 6px;
+  color: #a33b31;
+}
+
 .unresolved-candidates {
   display: flex;
   flex-wrap: wrap;

@@ -29,6 +29,23 @@ def test_baidu_same_day_window() -> None:
     assert event.end_at == datetime(2026, 7, 30, 21, 0, tzinfo=SHANGHAI)
 
 
+def test_seasonal_campus_heading_extracts_identity_without_fabricating_time() -> None:
+    event = parse_record(
+        mail(
+            "基恩士2027秋季校园招聘：销售工程师/销售岗位",
+            "简历已优先进入初筛阶段，面试环节预计将于8月统一启动。",
+        )
+    )
+    assert event is not None
+    assert event.company == "基恩士"
+    assert event.role == "销售工程师/销售"
+    assert event.recruiting_project == "2027校园招聘"
+    assert event.stage == "简历筛选"
+    assert event.start_at is None
+    assert event.end_at is None
+    assert event.deadline_at is None
+
+
 def test_cross_date_window_uses_end_as_critical_time(tmp_path) -> None:
     event = parse_record(
         mail(

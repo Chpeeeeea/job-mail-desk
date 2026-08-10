@@ -244,3 +244,43 @@ def test_unresolved_store_is_idempotent_and_excludes_private_fields(tmp_path) ->
     assert resolved.status == "resolved"
     assert resolved.resolved_application_key == "app-jds"
     assert resolved.resolved_task_id == "task-1"
+    store.save(record)
+    replayed = store.load(record.id)
+    assert replayed is not None and replayed.status == "resolved"
+
+
+def test_unresolved_draft_round_trip_is_structured_and_privacy_safe(tmp_path) -> None:
+    decision = resolve_event_batch(
+        [event(company="样例公司", role="销售工程师")],
+        [application("app-one", project="JDS", role="产品经理")],
+        load_identity_dictionaries(),
+    )[0]
+    store = UnresolvedStore(tmp_path)
+    record = unresolved_from_decision("b" * 32, decision)
+    store.save(record)
+    updated = store.update_draft(
+        record.id,
+        {
+            "company": "基恩士 candidate@example.com",
+            "role": "销售工程师 13800138000",
+            "recruiting_project": "2027校园招聘",
+            "recruiting_year": "2027",
+            "stage": "简历筛选",
+            "round": "初筛",
+            "start_at": "",
+            "end_at": "",
+            "deadline_at": "",
+            "time_hint": "预计2026年8月启动 https://example.com/private",
+            "action_summary": "等待面试安排 candidate@example.com",
+        },
+    )
+    loaded = store.load(record.id)
+    assert loaded == updated
+    assert loaded is not None
+    assert loaded.recruiting_year == 2027
+    assert loaded.time_hint == "预计2026年8月启动 [链接已隐藏]"
+    assert loaded.start_at is None
+    content = store.path_for(record.id).read_text(encoding="utf-8")
+    assert "candidate@example.com" not in content
+    assert "13800138000" not in content
+    assert "https://" not in content
