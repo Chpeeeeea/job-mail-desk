@@ -193,7 +193,7 @@ def test_confirm_pending_into_new_chain_is_reviewable_and_idempotent(
     assert len(MarkdownTaskStore(tasks).all()) == 1
 
 
-def test_confirm_pending_into_explicit_existing_chain_creates_one_task(
+def test_confirm_pending_uses_selected_chain_identity_without_cross_pollution(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -220,24 +220,37 @@ def test_confirm_pending_into_explicit_existing_chain_creates_one_task(
     api.confirm_unresolved(
         record.id,
         {
-            "company": record.company,
-            "role": record.role,
-            "recruiting_project": record.recruiting_project,
+            "company": "错误公司",
+            "role": "错误岗位",
+            "recruiting_project": "错误招聘项目",
             "recruiting_year": 2027,
-            "stage": record.stage,
-            "round": "",
-            "start_at": "",
+            "stage": "二面",
+            "round": "第二轮",
+            "start_at": "2026-08-20T14:00",
             "end_at": "",
             "deadline_at": "",
             "time_hint": record.time_hint,
-            "action_summary": record.action_summary,
+            "action_summary": "准备第二轮面试",
         },
         application.application_key,
     )
     materialized = MarkdownTaskStore(tasks).all()
     assert len(materialized) == 1
-    assert materialized[0].application_key == application.application_key
+    task = materialized[0]
+    assert task.application_key == application.application_key
+    assert task.company == "基恩士"
+    assert task.role == "销售工程师"
+    assert task.recruiting_project == "2027校园招聘"
+    assert task.stage == "二面"
+    assert task.round == "第二轮"
+    assert task.start_at == datetime(2026, 8, 20, 14, 0, tzinfo=SHANGHAI)
+    assert task.action_summary == "准备第二轮面试"
     assert len(ApplicationRegistry(applications).all()) == 1
+    unchanged = ApplicationRegistry(applications).load(application.application_key)
+    assert unchanged is not None
+    assert unchanged.company == "基恩士"
+    assert unchanged.role == "销售工程师"
+    assert unchanged.recruiting_project == "2027校园招聘"
 
 
 def test_mail_connection_test_uses_unsaved_imap_form_values(monkeypatch) -> None:

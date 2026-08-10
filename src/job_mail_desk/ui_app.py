@@ -541,10 +541,13 @@ class DesktopApi:
         if legacy_id not in application.legacy_application_ids:
             application.legacy_application_ids.append(legacy_id)
             ApplicationRegistry(APPLICATIONS_DIR).save(application)
+        # Selecting an existing chain is an explicit identity decision.  The
+        # chain's locked company/role/project must remain authoritative even
+        # when the editable card still contains stale or conflicting values.
         event = ParsedEvent(
-            company=record.company,
-            role=record.role,
-            recruiting_project=record.recruiting_project,
+            company=application.company,
+            role=application.role,
+            recruiting_project=application.recruiting_project,
             event_type=record.event_type,
             stage=record.stage,
             round=record.round,
