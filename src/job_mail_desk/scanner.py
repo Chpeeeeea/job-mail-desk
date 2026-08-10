@@ -22,7 +22,7 @@ from .identity_dictionaries import load_identity_dictionaries
 from .identity_pipeline import resolve_event_batch
 from .identity_resolver import ResolutionResult
 from .markdown_store import MarkdownTaskStore
-from .models import ApplicationRecord
+from .models import ApplicationRecord, ParsedEvent
 from .parser import PARSER_VERSION, SHANGHAI, parse_record
 from .progress import export_progress, sync_current_applications_to_ledger
 from .research import synchronize_research_state
@@ -179,6 +179,146 @@ def _backfill_task_application_keys(
     return updated
 
 
+def _backfill_task_identity_fields(
+    registry: ApplicationRegistry,
+    store: MarkdownTaskStore,
+) -> int:
+    """Fill missing display identity from the canonical application record."""
+
+    applications = {
+        record.application_key: record
+        for record in registry.all(ignore_invalid=True)
+    }
+    updated = 0
+    for task in store.all():
+        if not task.application_key:
+            continue
+        application = applications.get(task.application_key)
+        if not application:
+            continue
+        changed = False
+        if not task.role and application.role:
+            task.role = application.role
+            changed = True
+        if not task.recruiting_project and application.recruiting_project:
+            task.recruiting_project = application.recruiting_project
+            changed = True
+        if changed:
+            store.save(task)
+            updated += 1
+    return updated
+
+
+def _event_from_unresolved(record) -> ParsedEvent:
+    """Rehydrate a privacy-safe pending record for identity reconciliation."""
+
+    return ParsedEvent(
+        company=record.company,
+        role=record.role,
+        recruiting_project=record.recruiting_project,
+        event_type=record.event_type,
+        stage=record.stage,
+        round=record.round,
+        title=record.title,
+        start_at=record.start_at,
+        end_at=record.end_at,
+        deadline_at=record.deadline_at,
+        source_message_id=f"unresolved:{record.id}",
+        source_received_at=record.received_at,
+        source_sender="",
+        source_url=None,
+        action_summary=record.action_summary,
+        requirements=record.requirements,
+        matched_keywords=(),
+        confidence=record.confidence,
+        change_type=record.change_type,  # type: ignore[arg-type]
+    )
+
+
+def _reconcile_pending_unresolved(
+    settings: Settings,
+    store: MarkdownTaskStore,
+    state: StateStore,
+    registry: ApplicationRegistry,
+    dictionaries,
+) -> tuple[int, int, int, int]:
+    """Promote pending records when a stronger resolver rule becomes available.
+
+    A message is marked processed at first sight to prevent duplicate IMAP
+    work.  That used to make an unresolved first application permanent.  This
+    small local pass retries only pending, privacy-safe metadata and can create
+    a chain once a stable job code is available.
+    """
+
+    unresolved_store = UnresolvedStore(UNRESOLVED_DIR)
+    pending = [item for item in unresolved_store.all() if item.status == "pending"]
+    if not pending:
+        return 0, 0, 0, 0
+
+    events = [_event_from_unresolved(item) for item in pending]
+    applications = registry.all(ignore_invalid=True)
+    decisions = resolve_event_batch(events, applications, dictionaries)
+    updated = identity_matched = identity_new = identity_conflicts = 0
+    for item, event, decision in zip(pending, events, decisions, strict=True):
+        if decision.action in {"unresolved", "conflict"}:
+            # Refresh normalized candidate fields (including a recovered job
+            # code) without changing the user's pending decision.
+            unresolved_store.save(unresolved_from_decision(item.id, decision))
+            if decision.action == "conflict":
+                identity_conflicts += 1
+            continue
+
+        application_key = decision.application_key
+        if not application_key:
+            continue
+        # Carry normalized identity fields into the materialized task too;
+        # older unresolved files may have stored only the action summary.
+        event = replace(
+            event,
+            role=decision.candidate.role or event.role,
+            recruiting_project=(
+                decision.candidate.recruiting_project
+                or event.recruiting_project
+            ),
+        )
+        resolved_legacy_id = _legacy_id_for_key(application_key, registry, store)
+        if not resolved_legacy_id:
+            identity_conflicts += 1
+            continue
+
+        application = registry.load(application_key)
+        if decision.action == "new_application" and not application:
+            application = _application_from_decision(
+                decision,
+                dictionaries,
+                resolved_legacy_id,
+            )
+            registry.save(application)
+            identity_new += 1
+        else:
+            identity_matched += 1
+            if application and resolved_legacy_id not in application.legacy_application_ids:
+                application.legacy_application_ids.append(resolved_legacy_id)
+                application.legacy_application_ids.sort()
+                registry.save(application)
+
+        task = task_from_event(
+            event,
+            store,
+            application_key=application_key,
+            resolved_application_id=resolved_legacy_id,
+        )
+        store.save(task)
+        unresolved_store.resolve(
+            item.id,
+            application_key=application_key,
+            task_id=task.id,
+        )
+        state.mark_processed(item.id, task.id)
+        updated += 1
+    return updated, identity_matched, identity_new, identity_conflicts
+
+
 def _scan_identity_preview(
     settings: Settings,
     *,
@@ -254,6 +394,7 @@ def scan_once(
     run_id = state.begin_scan()
     fetched = skipped = candidates = updated = parse_failed = queued = urgent = exported = 0
     preview: list[dict[str, object]] = []
+    identity_matched = identity_new = identity_unresolved = identity_conflicts = 0
     try:
         if settings.obsidian_enabled:
             import_checked_states(settings.obsidian_output, store)
@@ -297,6 +438,23 @@ def scan_once(
             registry.import_progress(settings.progress_source)
         if not shadow:
             _backfill_task_application_keys(registry, store)
+            updated += _backfill_task_identity_fields(registry, store)
+            (
+                reconciled,
+                reconciled_matched,
+                reconciled_new,
+                reconciled_conflicts,
+            ) = _reconcile_pending_unresolved(
+                settings,
+                store,
+                state,
+                registry,
+                dictionaries,
+            )
+            updated += reconciled
+            identity_matched += reconciled_matched
+            identity_new += reconciled_new
+            identity_conflicts += reconciled_conflicts
         applications = (
             _resolution_applications(settings)
             if shadow
@@ -308,7 +466,6 @@ def scan_once(
             dictionaries,
         )
         unresolved_store = UnresolvedStore(UNRESOLVED_DIR)
-        identity_matched = identity_new = identity_unresolved = identity_conflicts = 0
         for (event, source_hash, _record), decision in zip(
             pending_events,
             decisions,
@@ -332,6 +489,14 @@ def scan_once(
                 identity_unresolved += 1
                 state.mark_processed(source_hash, None)
                 continue
+            event = replace(
+                event,
+                role=decision.candidate.role or event.role,
+                recruiting_project=(
+                    decision.candidate.recruiting_project
+                    or event.recruiting_project
+                ),
+            )
             resolved_legacy_id = _legacy_id_for_key(application_key, registry, store)
             if not resolved_legacy_id:
                 conflict_decision = replace(

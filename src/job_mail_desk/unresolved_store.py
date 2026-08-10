@@ -41,6 +41,7 @@ class UnresolvedRecord:
     resolved_application_key: str | None
     resolved_task_id: str | None
     rule_version: str
+    job_code: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -71,6 +72,7 @@ class UnresolvedRecord:
             "resolved_application_key": self.resolved_application_key,
             "resolved_task_id": self.resolved_task_id,
             "rule_version": self.rule_version,
+            "job_code": self.job_code,
         }
 
 
@@ -79,14 +81,18 @@ def unresolved_from_decision(
     decision: IdentityDecision,
 ) -> UnresolvedRecord:
     event = decision.event
+    candidate = decision.candidate
     return UnresolvedRecord(
         id=source_hash,
         status="pending",
         resolution_status=decision.resolution.status,
         reason=decision.resolution.reason,
         company=_private_safe(event.company or "") or None,
-        role=_private_safe(event.role or "") or None,
-        recruiting_project=_private_safe(event.recruiting_project or "") or None,
+        role=_private_safe(candidate.role or event.role or "") or None,
+        recruiting_project=(
+            _private_safe(candidate.recruiting_project or event.recruiting_project or "")
+            or None
+        ),
         event_type=_private_safe(event.event_type),
         stage=_private_safe(event.stage),
         round=_private_safe(event.round or "") or None,
@@ -109,6 +115,7 @@ def unresolved_from_decision(
         resolved_application_key=None,
         resolved_task_id=None,
         rule_version=decision.resolution.rule_version,
+        job_code=candidate.job_code,
     )
 
 
@@ -254,6 +261,11 @@ class UnresolvedStore:
                     rule_version=str(
                         payload.get("rule_version")
                         or "identity-registry-v1"
+                    ),
+                    job_code=(
+                        str(payload["job_code"])
+                        if payload.get("job_code")
+                        else None
                     ),
                 )
             )
