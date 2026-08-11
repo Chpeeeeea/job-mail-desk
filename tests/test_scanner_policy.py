@@ -11,7 +11,7 @@ from job_mail_desk.scanner import (
 from job_mail_desk import scanner
 from job_mail_desk.state import StateStore
 from job_mail_desk.markdown_store import MarkdownTaskStore
-from job_mail_desk.unresolved_store import UnresolvedStore
+from job_mail_desk.unresolved_store import UnresolvedRecord, UnresolvedStore
 
 
 def test_first_scan_uses_30_days_then_returns_to_configured_window(tmp_path) -> None:
@@ -63,6 +63,84 @@ def test_old_undated_assessment_leaves_attention_views() -> None:
     assert _is_stale_attention(task, now)
     task.status = "confirmed"
     assert not _is_stale_attention(task, now)
+
+
+def test_reconcile_closes_historical_pending_record_when_task_exists(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    received = datetime(2026, 8, 1, 9, 0, tzinfo=SHANGHAI)
+    source_identity = "3" * 32
+    task = JobTask(
+        id="1" * 24,
+        application_id="2" * 20,
+        company="样例公司",
+        role="产品经理",
+        recruiting_project="2027校园招聘",
+        event_type="application",
+        stage="网申",
+        round=None,
+        received_at=received,
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        priority="normal",
+        status="done",
+        change_type="new",
+        source_message_hash=source_identity,
+        research_status="closed",
+        confidence=1.0,
+        title="网申成功",
+        action_summary="等待后续",
+    )
+    task_store = MarkdownTaskStore(tmp_path / "tasks")
+    task_store.save(task)
+    unresolved_store = UnresolvedStore(tmp_path / "unresolved")
+    unresolved_store.save(
+        UnresolvedRecord(
+            id=source_identity,
+            status="pending",
+            resolution_status="unresolved",
+            reason="multiple-candidates",
+            company="样例公司",
+            role="产品经理",
+            recruiting_project="2027校园招聘",
+            event_type="application",
+            stage="网申",
+            round=None,
+            received_at=received,
+            start_at=None,
+            end_at=None,
+            deadline_at=None,
+            action_summary="等待后续",
+            title="网申成功",
+            requirements=(),
+            confidence=0.9,
+            change_type="new",
+            candidate_application_keys=(),
+            resolved_application_key=None,
+            resolved_task_id=None,
+            rule_version="identity-registry-v1",
+        )
+    )
+    state = StateStore(tmp_path / "state.db")
+    monkeypatch.setattr(scanner, "UNRESOLVED_DIR", tmp_path / "unresolved")
+
+    result = scanner._reconcile_pending_unresolved(
+        Settings(),
+        task_store,
+        state,
+        object(),
+        object(),
+    )
+
+    assert result == (1, 0, 0, 0)
+    reconciled = unresolved_store.load(source_identity)
+    assert reconciled is not None
+    assert reconciled.status == "resolved"
+    assert reconciled.resolved_task_id == task.id
+    assert state.is_processed(source_identity)
+    assert len(task_store.all()) == 1
 
 
 def test_one_parser_failure_does_not_abort_the_mail_batch(tmp_path, monkeypatch) -> None:

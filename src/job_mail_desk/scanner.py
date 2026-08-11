@@ -255,10 +255,38 @@ def _reconcile_pending_unresolved(
     if not pending:
         return 0, 0, 0, 0
 
+    # Older versions could materialize a task without closing the matching
+    # unresolved buffer record.  The editable review view exposes the whole
+    # buffer, so reconcile that historical split-brain state before asking the
+    # resolver to make a new identity decision.  The source identity is an
+    # exact internal match; no fuzzy company/role comparison is involved.
+    tasks_by_source = {
+        task.source_message_hash: task
+        for task in store.all()
+        if task.source_message_hash
+    }
+    remaining = []
+    updated = 0
+    for item in pending:
+        task = tasks_by_source.get(item.id)
+        if not task:
+            remaining.append(item)
+            continue
+        unresolved_store.resolve(
+            item.id,
+            application_key=task.application_key or task.application_id,
+            task_id=task.id,
+        )
+        state.mark_processed(item.id, task.id)
+        updated += 1
+    pending = remaining
+    if not pending:
+        return updated, 0, 0, 0
+
     events = [_event_from_unresolved(item) for item in pending]
     applications = registry.all(ignore_invalid=True)
     decisions = resolve_event_batch(events, applications, dictionaries)
-    updated = identity_matched = identity_new = identity_conflicts = 0
+    identity_matched = identity_new = identity_conflicts = 0
     for item, event, decision in zip(pending, events, decisions, strict=True):
         if decision.action in {"unresolved", "conflict"}:
             # Refresh normalized candidate fields (including a recovered job

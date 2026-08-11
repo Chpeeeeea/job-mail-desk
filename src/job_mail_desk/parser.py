@@ -11,7 +11,7 @@ from .privacy import redact_text
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-PARSER_VERSION = "2026.08.11.1"
+PARSER_VERSION = "2026.08.11.2"
 URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 RECRUITING_KEYWORDS = (
     "笔试",
@@ -85,6 +85,12 @@ ROLE_PATTERNS = (
     re.compile(r"(?:面试职位|应聘职位|职位名称|应聘岗位|岗位名称)\s*[:：]\s*([^\n。；]{2,60})"),
     re.compile(r"意向岗位\s*[:：]\s*([^\n。；]{2,60})"),
     re.compile(r"(?:岗位|职位)\s*[:：]\s*([^\n。；]{2,60})"),
+)
+CAMPUS_APPLICATION_IDENTITY = re.compile(
+    r"感谢(?:您|你)?投递\s*"
+    r"(?P<company>[\u4e00-\u9fffA-Za-z0-9·.&（）() -]{2,40}?)"
+    r"(?P<year>20\d{2})届?(?:秋季|春季)?(?:校园招聘|校招)\s*[：:]\s*"
+    r"(?P<role>[^，。；;\n]{2,80}?)\s*(?:职位|岗位)(?:[，。；;！!]|$)"
 )
 
 
@@ -283,7 +289,21 @@ def _change(subject: str, body: str) -> str:
     return "new"
 
 
-def _company(subject: str, sender: str) -> str | None:
+def _campus_application_identity(text: str) -> tuple[str | None, str | None]:
+    match = CAMPUS_APPLICATION_IDENTITY.search(normalize(text))
+    if not match:
+        return None, None
+    company = canonical_company(match.group("company").strip(" -—|：:"))
+    role = redact_text(match.group("role")).strip(" -—|：:")
+    return company, role[:80] or None
+
+
+def _company(subject: str, sender: str, body: str = "") -> str | None:
+    # A generic ATS subject may say only “本公司职位”, while the message body
+    # contains the authoritative company + recruiting cycle + role sentence.
+    body_company, _ = _campus_application_identity(body)
+    if body_company:
+        return body_company
     bracket = re.search(r"【([^】]{2,30})】", subject)
     if bracket:
         company = canonical_company(bracket.group(1))
@@ -328,6 +348,9 @@ def _company(subject: str, sender: str) -> str | None:
 
 
 def _role(body: str, subject: str = "") -> str | None:
+    _, body_role = _campus_application_identity(body)
+    if body_role:
+        return body_role
     campus_heading = re.match(
         r"\s*[\u4e00-\u9fffA-Za-z·.]{2,30}?"
         r"(?:20\d{2})(?:秋季|春季)?(?:校园招聘|校招)\s*[：:]\s*"
@@ -455,7 +478,7 @@ def parse_record(record: MailRecord) -> ParsedEvent | None:
         return None
     stage = _stage(subject, body)
     start, end, deadline = _times(combined, record.received_at.astimezone(SHANGHAI))
-    company = _company(subject, record.sender)
+    company = _company(subject, record.sender, record.body)
     role = _role(record.body, subject)
     if not role and re.search(r"TET\s*综合(?:面|方向)", subject, re.IGNORECASE):
         role = "TET 综合方向"

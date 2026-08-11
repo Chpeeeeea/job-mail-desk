@@ -46,6 +46,32 @@ def test_seasonal_campus_heading_extracts_identity_without_fabricating_time() ->
     assert event.deadline_at is None
 
 
+def test_generic_ats_subject_uses_campus_identity_from_body() -> None:
+    record = MailRecord(
+        uid="keyence-body",
+        subject="感谢您投递本公司职位",
+        message_id="<keyence-body@example.invalid>",
+        sender="招聘团队 <noreply@example.invalid>",
+        received_at=datetime(2026, 8, 11, 0, 20, tzinfo=SHANGHAI),
+        body=(
+            "同学您好！感谢您投递基恩士2027秋季校园招聘：销售工程师/销售岗位。"
+            "作为首批投递的候选人，您的简历已优先进入初筛阶段。"
+            "正式的秋招面试环节预计将于8月统一启动。"
+        ),
+    )
+
+    event = parse_record(record)
+
+    assert event is not None
+    assert event.company == "基恩士"
+    assert event.role == "销售工程师/销售"
+    assert event.recruiting_project == "2027校园招聘"
+    assert event.stage == "简历筛选"
+    assert event.start_at is None
+    assert event.end_at is None
+    assert event.deadline_at is None
+
+
 def test_cross_date_window_uses_end_as_critical_time(tmp_path) -> None:
     event = parse_record(
         mail(
