@@ -17,6 +17,12 @@ from .normalization import is_invalid_role
 
 
 JOB_CODE = re.compile(r"\b([A-Za-z]\d{4,})\b", re.IGNORECASE)
+ROLE_WITH_JOB_CODE = re.compile(
+    r"(?:20\d{2}|2\d届)?[^()\r\n]{0,80}?[-—－–:：]\s*"
+    r"(?P<role>[^()\r\n,，;；]{2,80}?)\s*[\(（]\s*"
+    r"(?P<code>[A-Za-z]\d{4,})\s*[\)）]",
+    re.IGNORECASE,
+)
 RECRUITING_YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
 BATCH_CONTEXT_WINDOW = timedelta(hours=2)
 PROJECT_CODE = re.compile(r"(?<![A-Za-z])(JDS|TET|TGT)(?![A-Za-z])", re.I)
@@ -25,6 +31,37 @@ GENERIC_PROJECT_SUFFIX = re.compile(
     r"(?:校园招聘|校招|秋招|春招|提前批|正式批)$"
 )
 APPLICATION_STAGE = re.compile(r"网申|投递|申请|简历")
+
+
+def _extract_job_identity(event: ParsedEvent) -> tuple[str | None, str | None]:
+    """Recover a strong job identity from standardized mail summaries.
+
+    Many ATS receipts do not expose a role in the parser's dedicated role
+    field.  They do, however, include a stable job code in the action summary,
+    for example ``27届校招-AI产品经理(J14379)``.  The code is stronger than a
+    generic "application received" template and lets Core create a distinct
+    application chain without an LLM.
+    """
+
+    sources = (
+        event.action_summary,
+        event.title,
+        event.role or "",
+        event.recruiting_project or "",
+    )
+    for source in sources:
+        if not source:
+            continue
+        code_match = JOB_CODE.search(source)
+        if not code_match:
+            continue
+        code = code_match.group(1).upper()
+        role_match = ROLE_WITH_JOB_CODE.search(source)
+        if role_match and role_match.group("code").upper() == code:
+            role = canonical_role(role_match.group("role"))
+            return code, role
+        return code, None
+    return None, None
 
 
 @dataclass(frozen=True)
@@ -72,6 +109,9 @@ def identity_candidate_from_event(
         event.recruiting_project,
     )
     role = canonical_role(event.role)
+    extracted_job_code, extracted_role = _extract_job_identity(event)
+    if not role and extracted_role:
+        role = extracted_role
     project_source = " ".join(item for item in (project, role) if item)
     project_code = PROJECT_CODE.search(project_source)
     if project_code:
@@ -79,7 +119,9 @@ def identity_candidate_from_event(
     elif project:
         project = GENERIC_PROJECT_SUFFIX.sub("", project).strip(" ·•|｜/-") or None
     combined = " ".join(
-        item for item in (event.title, role, project) if item
+        item
+        for item in (event.title, role, project, event.action_summary)
+        if item
     )
     code_match = JOB_CODE.search(combined)
     year_source = " ".join(item for item in (role, project) if item)
@@ -105,7 +147,10 @@ def identity_candidate_from_event(
         recruiting_project=project,
         recruiting_year=int(year_match.group(1)) if year_match else None,
         business_unit=business_unit,
-        job_code=code_match.group(1).upper() if code_match else None,
+        job_code=(
+            extracted_job_code
+            or (code_match.group(1).upper() if code_match else None)
+        ),
         template_id=str(template["id"]) if template else None,
     )
 
@@ -116,7 +161,12 @@ def _new_application_key(
     resolution: ResolutionResult,
     dictionaries: IdentityDictionaries,
 ) -> str | None:
-    if resolution.candidates:
+    strong_code_conflict = bool(
+        candidate.job_code
+        and resolution.candidates
+        and all("job-code" in item.conflicts for item in resolution.candidates)
+    )
+    if resolution.candidates and not strong_code_conflict:
         return None
     if not candidate.company or candidate.company == "公司待确认":
         return None
@@ -131,7 +181,16 @@ def _new_application_key(
             ),
             None,
         )
-        if template and template.get("creates_application") is False:
+        # Reviewed generic receipt templates normally attach to an existing
+        # chain.  When the mail carries a stable ATS job code, it is also a
+        # valid first signal for a new chain (e.g. J14379/J14390).  Keep the
+        # conservative behavior for code-less generic receipts so a plain
+        # "we received your application" message cannot create a duplicate.
+        if (
+            template
+            and template.get("creates_application") is False
+            and not candidate.job_code
+        ):
             return None
     if candidate.role and (
         is_invalid_role(candidate.role) or len(candidate.role) > 120
@@ -175,8 +234,15 @@ def resolve_event_batch(
             action = "matched"
             application_key = resolution.application_key
         elif resolution.status == "conflict":
-            action = "conflict"
-            application_key = None
+            # A different explicit ATS job code is evidence for a separate
+            # application, not an identity ambiguity.  Keep true conflicts
+            # (same code, multiple candidates or project mismatch) pending.
+            application_key = (
+                _new_application_key(event, candidate, resolution, dictionaries)
+                if event.event_type == "application"
+                else None
+            )
+            action = "new_application" if application_key else "conflict"
         else:
             application_key = (
                 _new_application_key(event, candidate, resolution, dictionaries)

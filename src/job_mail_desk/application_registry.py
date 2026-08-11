@@ -179,6 +179,64 @@ def application_from_progress_entry(
     )
 
 
+def application_from_confirmed_fields(
+    *,
+    company: str,
+    role: str,
+    recruiting_project: str | None,
+    recruiting_year: int | None,
+    job_code: str | None = None,
+    now: datetime | None = None,
+) -> ApplicationRecord:
+    """Create a deterministic, user-locked identity from an edited pending card."""
+    current = (now or datetime.now(SHANGHAI)).astimezone(SHANGHAI)
+    normalized_company, normalized_project = normalize_company_project(
+        company,
+        recruiting_project,
+    )
+    normalized_role = canonical_role(role) or role.strip()
+    business_unit = _business_unit(
+        normalized_company,
+        normalized_role,
+        normalized_project,
+    )
+    key = stable_application_key(
+        company=normalized_company,
+        role=normalized_role,
+        recruiting_project=normalized_project,
+        recruiting_year=recruiting_year,
+        business_unit=business_unit,
+        job_code=job_code,
+    )
+    evidence = ["pending-card-confirmed"]
+    if normalized_project:
+        evidence.append(f"project:{normalized_project}")
+    if recruiting_year:
+        evidence.append(f"recruiting-year:{recruiting_year}")
+    if job_code:
+        evidence.append(f"job-code:{job_code.upper()}")
+    return ApplicationRecord(
+        application_key=key,
+        company_key=_company_key(normalized_company),
+        company=normalized_company,
+        recruiting_project=normalized_project,
+        recruiting_year=recruiting_year,
+        business_unit=business_unit,
+        role=normalized_role,
+        role_aliases=[],
+        job_code=job_code.upper() if job_code else None,
+        submitted_at=None,
+        status="active",
+        source="pending-card",
+        confirmed_by_user=True,
+        identity_locked=True,
+        legacy_application_ids=[],
+        identity_evidence=evidence,
+        created_at=current,
+        updated_at=current,
+    )
+
+
 def preview_progress_applications(path: Path | None) -> list[ApplicationRecord]:
     records: dict[str, ApplicationRecord] = {}
     for entry in read_progress_entries(path):

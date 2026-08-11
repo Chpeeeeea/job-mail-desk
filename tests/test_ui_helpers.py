@@ -8,8 +8,10 @@ import pytest
 
 from job_mail_desk.config import Settings
 from job_mail_desk.markdown_store import MarkdownTaskStore
-from job_mail_desk.models import JobTask
+from job_mail_desk.models import ApplicationRecord, JobTask
 from job_mail_desk.parser import SHANGHAI
+from job_mail_desk.application_registry import ApplicationRegistry
+from job_mail_desk.unresolved_store import UnresolvedRecord, UnresolvedStore
 from job_mail_desk.ui_app import (
     DesktopApi,
     _claim_single_instance,
@@ -108,6 +110,147 @@ def test_desktop_bridge_has_no_public_native_window() -> None:
     assert not hasattr(api, "settings")
     assert not hasattr(api, "download_update")
     assert not hasattr(api, "install_update")
+
+
+def pending_record(record_id: str, *, candidate: str = "") -> UnresolvedRecord:
+    return UnresolvedRecord(
+        id=record_id,
+        status="pending",
+        resolution_status="unresolved",
+        reason="needs-confirmation",
+        company="基恩士",
+        role="销售工程师",
+        recruiting_project="2027校园招聘",
+        event_type="notice",
+        stage="简历筛选",
+        round=None,
+        received_at=datetime(2026, 8, 1, 10, 0, tzinfo=SHANGHAI),
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        action_summary="等待面试安排",
+        title="校园招聘进度通知",
+        requirements=(),
+        confidence=0.9,
+        change_type="new",
+        candidate_application_keys=(candidate,) if candidate else (),
+        resolved_application_key=None,
+        resolved_task_id=None,
+        rule_version="identity-registry-v1",
+        recruiting_year=2027,
+        time_hint="预计2026年8月启动",
+    )
+
+
+def configure_pending_api(tmp_path, monkeypatch):
+    tasks = tmp_path / "tasks"
+    unresolved = tmp_path / "unresolved"
+    applications = tmp_path / "applications"
+    monkeypatch.setattr("job_mail_desk.ui_app.TASKS_DIR", tasks)
+    monkeypatch.setattr("job_mail_desk.ui_app.UNRESOLVED_DIR", unresolved)
+    monkeypatch.setattr("job_mail_desk.ui_app.APPLICATIONS_DIR", applications)
+    monkeypatch.setattr(
+        "job_mail_desk.ui_app.cached_dashboard_payload",
+        lambda *args, **kwargs: {"tasks": [], "unresolved": []},
+    )
+    api = DesktopApi(Settings())
+    monkeypatch.setattr(api, "_export", lambda store: None)
+    return api, tasks, unresolved, applications
+
+
+def test_confirm_pending_into_new_chain_is_reviewable_and_idempotent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    api, tasks, unresolved, applications = configure_pending_api(tmp_path, monkeypatch)
+    record = pending_record("c" * 32)
+    UnresolvedStore(unresolved).save(record)
+    payload = {
+        "company": record.company,
+        "role": record.role,
+        "recruiting_project": record.recruiting_project,
+        "recruiting_year": 2027,
+        "stage": record.stage,
+        "round": "",
+        "start_at": "",
+        "end_at": "",
+        "deadline_at": "",
+        "time_hint": record.time_hint,
+        "action_summary": record.action_summary,
+    }
+
+    api.confirm_unresolved(record.id, payload)
+    saved = UnresolvedStore(unresolved).load(record.id)
+    assert saved is not None and saved.status == "resolved"
+    assert len(ApplicationRegistry(applications).all()) == 1
+    materialized = MarkdownTaskStore(tasks).all()
+    assert len(materialized) == 1
+    assert materialized[0].status == "needs_review"
+    assert materialized[0].manual_notes == "预计2026年8月启动"
+    with pytest.raises(ValueError, match="已经处理"):
+        api.confirm_unresolved(record.id, payload)
+    assert len(ApplicationRegistry(applications).all()) == 1
+    assert len(MarkdownTaskStore(tasks).all()) == 1
+
+
+def test_confirm_pending_uses_selected_chain_identity_without_cross_pollution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    api, tasks, unresolved, applications = configure_pending_api(tmp_path, monkeypatch)
+    application = ApplicationRecord(
+        application_key="app-1234567890abcdef12345678",
+        company_key="keyence",
+        company="基恩士",
+        recruiting_project="2027校园招聘",
+        recruiting_year=2027,
+        business_unit=None,
+        role="销售工程师",
+        role_aliases=[],
+        job_code=None,
+        submitted_at=None,
+        status="active",
+        source="test",
+        confirmed_by_user=True,
+        identity_locked=True,
+    )
+    ApplicationRegistry(applications).save(application)
+    record = pending_record("d" * 32, candidate=application.application_key)
+    UnresolvedStore(unresolved).save(record)
+    api.confirm_unresolved(
+        record.id,
+        {
+            "company": "错误公司",
+            "role": "错误岗位",
+            "recruiting_project": "错误招聘项目",
+            "recruiting_year": 2027,
+            "stage": "二面",
+            "round": "第二轮",
+            "start_at": "2026-08-20T14:00",
+            "end_at": "",
+            "deadline_at": "",
+            "time_hint": record.time_hint,
+            "action_summary": "准备第二轮面试",
+        },
+        application.application_key,
+    )
+    materialized = MarkdownTaskStore(tasks).all()
+    assert len(materialized) == 1
+    task = materialized[0]
+    assert task.application_key == application.application_key
+    assert task.company == "基恩士"
+    assert task.role == "销售工程师"
+    assert task.recruiting_project == "2027校园招聘"
+    assert task.stage == "二面"
+    assert task.round == "第二轮"
+    assert task.start_at == datetime(2026, 8, 20, 14, 0, tzinfo=SHANGHAI)
+    assert task.action_summary == "准备第二轮面试"
+    assert len(ApplicationRegistry(applications).all()) == 1
+    unchanged = ApplicationRegistry(applications).load(application.application_key)
+    assert unchanged is not None
+    assert unchanged.company == "基恩士"
+    assert unchanged.role == "销售工程师"
+    assert unchanged.recruiting_project == "2027校园招聘"
 
 
 def test_mail_connection_test_uses_unsaved_imap_form_values(monkeypatch) -> None:

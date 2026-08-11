@@ -384,17 +384,54 @@ function unresolvedMatches(record, filter) {
   return true;
 }
 
-async function handleUnresolved(record, action, applicationKey = "") {
+function unresolvedDraft(card) {
+  const value = (name) => card.querySelector(`[name="${name}"]`)?.value || "";
+  return {
+    company: value("company"),
+    role: value("role"),
+    recruiting_project: value("recruiting_project"),
+    recruiting_year: value("recruiting_year"),
+    stage: value("stage"),
+    round: value("round"),
+    start_at: value("start_at"),
+    end_at: value("end_at"),
+    deadline_at: value("deadline_at"),
+    time_hint: value("time_hint"),
+    action_summary: value("action_summary"),
+  };
+}
+
+function localDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function handleUnresolved(record, card, action, applicationKey = "") {
   if (!apiReady()) return;
-  if (action === "ignore") {
-    state.payload = await window.pywebview.api.ignore_unresolved(record.id);
-  } else if (action === "resolve" && applicationKey) {
-    state.payload = await window.pywebview.api.resolve_unresolved(
-      record.id,
-      applicationKey,
-    );
+  const status = card.querySelector(".unresolved-status");
+  try {
+    if (action === "ignore") {
+      state.payload = await window.pywebview.api.ignore_unresolved(record.id);
+    } else if (action === "save") {
+      state.payload = await window.pywebview.api.save_unresolved_draft(
+        record.id,
+        unresolvedDraft(card),
+      );
+    } else if (action === "confirm") {
+      state.payload = await window.pywebview.api.confirm_unresolved(
+        record.id,
+        unresolvedDraft(card),
+        applicationKey,
+      );
+    }
+    render();
+  } catch (error) {
+    status.textContent = error?.message || String(error);
+    status.classList.add("error");
   }
-  render();
 }
 
 function unresolvedCard(record) {
@@ -410,19 +447,52 @@ function unresolvedCard(record) {
     </div>
     <div class="meta"><span class="stage">${escapeHtml(record.stage || "招聘通知")}</span>
       <span class="round">身份需要确认</span></div>
-    <p class="action">${escapeHtml(record.action_summary || record.title || "请确认这封邮件属于哪条申请链")}</p>
+    <p class="unresolved-context"><strong>${escapeHtml(record.title || "待处理邮件")}</strong><br>
+      ${escapeHtml((record.requirements || []).join("；") || "暂无更多脱敏摘要")}</p>
+    <div class="unresolved-fields">
+      <label>公司<input name="company" value="${escapeHtml(record.company || "")}" placeholder="必填"></label>
+      <label>岗位<input name="role" value="${escapeHtml(record.role || "")}" placeholder="必填"></label>
+      <label>招聘项目<input name="recruiting_project" value="${escapeHtml(record.recruiting_project || "")}" placeholder="如 2027校园招聘"></label>
+      <label>招聘年份<input name="recruiting_year" type="number" min="2000" max="2100" value="${escapeHtml(record.recruiting_year || "")}"></label>
+      <label>当前阶段<input name="stage" value="${escapeHtml(record.stage || "招聘通知")}"></label>
+      <label>轮次<input name="round" value="${escapeHtml(record.round || "")}"></label>
+      <label>开始时间<input name="start_at" type="datetime-local" value="${localDateTime(record.start_at)}"></label>
+      <label>结束时间<input name="end_at" type="datetime-local" value="${localDateTime(record.end_at)}"></label>
+      <label>截止时间<input name="deadline_at" type="datetime-local" value="${localDateTime(record.deadline_at)}"></label>
+      <label class="wide">模糊时间提示<input name="time_hint" value="${escapeHtml(record.time_hint || "")}" placeholder="如 预计2026年8月启动"></label>
+      <label class="wide">下一步行动<textarea name="action_summary" rows="2">${escapeHtml(record.action_summary || "")}</textarea></label>
+    </div>
     <div class="unresolved-candidates"></div>
-    <div class="actions"><button data-unresolved-ignore="1" class="muted">忽略</button></div>
+    <div class="unresolved-confirm">
+      <label>确认归入
+        <select name="application_target"></select>
+      </label>
+      <button data-unresolved-confirm="1">确认并入链</button>
+    </div>
+    <div class="actions">
+      <button data-unresolved-save="1" class="secondary-action">保存草稿</button>
+      <button data-unresolved-ignore="1" class="muted">忽略</button>
+    </div>
+    <small class="unresolved-status" aria-live="polite"></small>
   `;
   const candidateBox = card.querySelector(".unresolved-candidates");
+  const target = card.querySelector('[name="application_target"]');
+  const newOption = document.createElement("option");
+  newOption.value = "";
+  newOption.textContent = "新建申请链";
+  target.append(newOption);
   const candidates = (record.candidates || []).map((candidate) => {
+    const option = document.createElement("option");
+    option.value = candidate.application_key;
+    option.textContent = `${candidate.company}｜${candidate.role}`;
+    target.append(option);
     const button = document.createElement("button");
     button.className = "secondary-action";
     button.type = "button";
     button.textContent = `${candidate.company}｜${candidate.role}`;
     button.title = "将邮件归入这条申请链";
     button.addEventListener("click", () =>
-      handleUnresolved(record, "resolve", candidate.application_key),
+      handleUnresolved(record, card, "confirm", candidate.application_key),
     );
     return button;
   });
@@ -431,12 +501,18 @@ function unresolvedCard(record) {
     label.textContent = "归入申请链：";
     candidateBox.append(label, ...candidates);
   } else {
-    candidateBox.textContent = "请先在求职进展台账中确认申请身份，刷新后再归属。";
+    candidateBox.textContent = "没有匹配的现有申请链，可从已确认字段新建。";
   }
+  card.querySelector("[data-unresolved-save]").addEventListener("click", () =>
+    handleUnresolved(record, card, "save"),
+  );
+  card.querySelector("[data-unresolved-confirm]").addEventListener("click", () =>
+    handleUnresolved(record, card, "confirm", target.value),
+  );
   const ignore = card.querySelector("[data-unresolved-ignore]");
   ignore.addEventListener("click", () => {
     if (ignore.dataset.armed === "1") {
-      handleUnresolved(record, "ignore");
+      handleUnresolved(record, card, "ignore");
       return;
     }
     ignore.dataset.armed = "1";

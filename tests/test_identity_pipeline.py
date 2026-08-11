@@ -123,6 +123,46 @@ def test_reviewed_receipt_template_cannot_create_application() -> None:
     assert decision.action == "unresolved"
 
 
+def test_reviewed_receipt_with_job_code_creates_distinct_application() -> None:
+    decision = resolve_event_batch(
+        [
+            event(
+                company="上海合合信息科技股份有限公司",
+                title="感谢您投递合合信息",
+                action="感谢您投递我公司的 27届校招-AI产品经理(J14379) 职位，已收到您的简历。",
+            )
+        ],
+        [],
+        load_identity_dictionaries(),
+    )[0]
+    assert decision.candidate.job_code == "J14379"
+    assert decision.candidate.role == "AI产品经理"
+    assert decision.action == "new_application"
+    assert decision.application_key
+
+
+def test_different_job_codes_do_not_conflict_with_each_other() -> None:
+    decisions = resolve_event_batch(
+        [
+            event(
+                company="上海合合信息科技股份有限公司",
+                title="感谢您投递合合信息",
+                action="感谢您投递我公司的 27届校招-AI产品经理(J14379) 职位。",
+            ),
+            event(
+                company="上海合合信息科技股份有限公司",
+                title="感谢您投递合合信息",
+                action="感谢您投递我公司的 27届校招-产运管培生(J14390) 职位。",
+                received_at=NOW + timedelta(minutes=5),
+            ),
+        ],
+        [],
+        load_identity_dictionaries(),
+    )
+    assert [item.action for item in decisions] == ["new_application", "new_application"]
+    assert decisions[0].application_key != decisions[1].application_key
+
+
 def test_project_codes_and_business_unit_suffixes_are_normalized() -> None:
     jds = event(role=None, project="JDS · 2027校园招聘", event_type="assessment")
     tet = event(role="TET 综合方向", project="2027校园招聘", event_type="assessment")
@@ -204,3 +244,43 @@ def test_unresolved_store_is_idempotent_and_excludes_private_fields(tmp_path) ->
     assert resolved.status == "resolved"
     assert resolved.resolved_application_key == "app-jds"
     assert resolved.resolved_task_id == "task-1"
+    store.save(record)
+    replayed = store.load(record.id)
+    assert replayed is not None and replayed.status == "resolved"
+
+
+def test_unresolved_draft_round_trip_is_structured_and_privacy_safe(tmp_path) -> None:
+    decision = resolve_event_batch(
+        [event(company="样例公司", role="销售工程师")],
+        [application("app-one", project="JDS", role="产品经理")],
+        load_identity_dictionaries(),
+    )[0]
+    store = UnresolvedStore(tmp_path)
+    record = unresolved_from_decision("b" * 32, decision)
+    store.save(record)
+    updated = store.update_draft(
+        record.id,
+        {
+            "company": "基恩士 candidate@example.com",
+            "role": "销售工程师 13800138000",
+            "recruiting_project": "2027校园招聘",
+            "recruiting_year": "2027",
+            "stage": "简历筛选",
+            "round": "初筛",
+            "start_at": "",
+            "end_at": "",
+            "deadline_at": "",
+            "time_hint": "预计2026年8月启动 https://example.com/private",
+            "action_summary": "等待面试安排 candidate@example.com",
+        },
+    )
+    loaded = store.load(record.id)
+    assert loaded == updated
+    assert loaded is not None
+    assert loaded.recruiting_year == 2027
+    assert loaded.time_hint == "预计2026年8月启动 [链接已隐藏]"
+    assert loaded.start_at is None
+    content = store.path_for(record.id).read_text(encoding="utf-8")
+    assert "candidate@example.com" not in content
+    assert "13800138000" not in content
+    assert "https://" not in content
