@@ -41,6 +41,7 @@ def test_seasonal_campus_heading_extracts_identity_without_fabricating_time() ->
     assert event.role == "销售工程师/销售"
     assert event.recruiting_project == "2027校园招聘"
     assert event.stage == "简历筛选"
+    assert event.event_type == "application"
     assert event.start_at is None
     assert event.end_at is None
     assert event.deadline_at is None
@@ -67,6 +68,7 @@ def test_generic_ats_subject_uses_campus_identity_from_body() -> None:
     assert event.role == "销售工程师/销售"
     assert event.recruiting_project == "2027校园招聘"
     assert event.stage == "简历筛选"
+    assert event.event_type == "application"
     assert event.start_at is None
     assert event.end_at is None
     assert event.deadline_at is None

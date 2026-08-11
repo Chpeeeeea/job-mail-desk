@@ -11,7 +11,7 @@ from .privacy import redact_text
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-PARSER_VERSION = "2026.08.11.2"
+PARSER_VERSION = "2026.08.11.3"
 URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 RECRUITING_KEYWORDS = (
     "笔试",
@@ -272,6 +272,7 @@ def _event_type(stage: str) -> str:
         "材料截止": "deadline",
         "简历完善": "deadline",
         "网申": "application",
+        "简历筛选": "application",
     }.get(stage, "notice")
 
 
