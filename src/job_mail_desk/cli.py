@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
+from . import __version__
 from .agent_bridge import apply_task_update, list_tasks, sync_outputs
 from .config import (
     APPLICATIONS_DIR,
@@ -12,6 +14,7 @@ from .config import (
     DASHBOARD_FILE,
     DIGESTS_DIR,
     TASKS_DIR,
+    STATE_NAMESPACE,
     UNRESOLVED_DIR,
     ensure_config,
     load_settings,
@@ -32,11 +35,15 @@ from .markdown_store import MarkdownTaskStore
 from .models import ParsedEvent
 from .research import pending_requests
 from .progress import export_progress
+from .parser import PARSER_VERSION
 from .scanner import scan_once
 from .scheduler import run_forever
 from .ui_app import run_ui, show_existing_window
 from .task_service import legacy_application_id, task_from_event
 from .unresolved_store import UnresolvedStore
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -156,6 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     ensure_config()
     settings = load_settings()
+    LOGGER.info(
+        "启动版本：app=%s parser=%s state=%s",
+        __version__,
+        PARSER_VERSION,
+        STATE_NAMESPACE,
+    )
     if args.command == "configure":
         configure_interactively()
         print("配置完成。请运行 jobmaildesk doctor 验证。")

@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from job_mail_desk.models import JobTask, MailRecord, ParsedEvent
 from job_mail_desk.parser import SHANGHAI
 from job_mail_desk.scanner import (
-    INITIAL_LOOKBACK_DAYS,
     _effective_lookback_days,
     _is_stale_attention,
 )
@@ -14,25 +13,17 @@ from job_mail_desk.markdown_store import MarkdownTaskStore
 from job_mail_desk.unresolved_store import UnresolvedStore
 
 
-def test_first_scan_uses_30_days_then_returns_to_configured_window(tmp_path) -> None:
+def test_normal_scan_uses_configured_window_even_for_new_or_changed_state(tmp_path) -> None:
     state = StateStore(tmp_path / "state.db")
     settings = Settings(lookback_days=3)
-    assert _effective_lookback_days(settings, state, None) == INITIAL_LOOKBACK_DAYS
+    assert _effective_lookback_days(settings, state, None) == 3
     assert _effective_lookback_days(settings, state, 12) == 12
 
     run_id = state.begin_scan()
     state.finish_scan(run_id, fetched=0, candidates=0)
 
     assert _effective_lookback_days(settings, state, None) == 3
-    assert (
-        _effective_lookback_days(
-            settings,
-            state,
-            None,
-            parser_changed=True,
-        )
-        == INITIAL_LOOKBACK_DAYS
-    )
+    assert _effective_lookback_days(settings, state, None, parser_changed=True) == 3
 
 
 def test_old_undated_assessment_leaves_attention_views() -> None:

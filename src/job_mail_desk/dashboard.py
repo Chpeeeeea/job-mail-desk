@@ -4,18 +4,21 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 
+from . import __version__
 from .application_registry import ApplicationRegistry
 from .config import (
     APPLICATIONS_DIR,
     DASHBOARD_CACHE,
     RESEARCH_QUEUE,
     STATE_DB,
+    STATE_NAMESPACE,
     TASKS_DIR,
     UNRESOLVED_DIR,
 )
 from .markdown_store import MarkdownTaskStore, _atomic_write
 from .models import JobTask
 from .parser import SHANGHAI
+from .parser import PARSER_VERSION
 from .progress import progress_payload
 from .research import request_states
 from .state import StateStore
@@ -180,6 +183,14 @@ def dashboard_payload(
             item["time"] or "9999",
         )
     )
+    health = StateStore(STATE_DB).health()
+    health.update(
+        {
+            "app_version": __version__,
+            "runtime_parser_version": PARSER_VERSION,
+            "state_namespace": STATE_NAMESPACE,
+        }
+    )
     return {
         "generated_at": now.isoformat(),
         "tasks": payload,
@@ -209,7 +220,7 @@ def dashboard_payload(
                 for item in payload
             ),
         },
-        "health": StateStore(STATE_DB).health(),
+        "health": health,
     }
 
 

@@ -11,7 +11,7 @@ from .privacy import redact_text
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-PARSER_VERSION = "2026.08.03.10"
+PARSER_VERSION = "2026.08.17.1"
 URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
 RECRUITING_KEYWORDS = (
     "笔试",

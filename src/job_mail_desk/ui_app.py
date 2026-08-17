@@ -46,6 +46,7 @@ from .config import (
     DICTIONARIES_DIR,
     IMPORTED_DICTIONARIES_DIR,
     STATE_DB,
+    STATE_NAMESPACE,
     TASKS_DIR,
     UNRESOLVED_DIR,
     Settings,
@@ -60,6 +61,7 @@ from .mail_reader import ImapReader
 from .dashboard import cached_dashboard_payload
 from .markdown_store import MarkdownTaskStore
 from .models import ParsedEvent
+from .parser import PARSER_VERSION
 from .research import request_states
 from .progress import create_progress_template
 from .scanner import scan_once
@@ -268,6 +270,11 @@ class DesktopApi:
             "config_path": str(CONFIG_PATH),
             "research_enabled": self._settings.research_enabled,
             "app_version": __version__,
+            "parser_version": PARSER_VERSION,
+            "state_parser_version": StateStore(STATE_DB).health().get(
+                "state_parser_version"
+            ),
+            "state_namespace": STATE_NAMESPACE,
             "updates_enabled": self._settings.updates_enabled,
             "update_channel": self._settings.update_channel,
         }

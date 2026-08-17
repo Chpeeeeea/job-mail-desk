@@ -816,6 +816,10 @@ async function showSettingsDialog(firstRun = false, payload = null) {
   settingsForm.elements.update_channel.value = settings.update_channel || "preview";
   settingsForm.elements.dictionary_workbook.value = "";
   document.querySelector("#currentVersion").textContent = `v${settings.app_version}`;
+  document.querySelector("#runtimeVersionStatus").textContent =
+    `parser ${settings.parser_version || "未初始化"} · ` +
+    `state ${settings.state_parser_version || "未初始化"} · ` +
+    `${settings.state_namespace || "未标识"}`;
   renderUpdateStatus(await window.pywebview.api.get_update_status());
   renderDictionaryStatus(await window.pywebview.api.get_dictionary_status());
   if (!settingsDialog.open) settingsDialog.showModal();

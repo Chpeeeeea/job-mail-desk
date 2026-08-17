@@ -6,6 +6,9 @@ import tomllib
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from . import __version__
+from .parser import PARSER_VERSION
+
 
 APP_NAME = "JobMailDesk"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -29,7 +32,10 @@ MANUAL_DICTIONARIES_DIR = DICTIONARIES_DIR / "manual"
 UNRESOLVED_DIR = LOCAL_ROOT / "unresolved"
 DIGESTS_DIR = LOCAL_ROOT / "digests"
 LOG_DIR = LOCAL_ROOT / "logs"
-STATE_DB = LOCAL_ROOT / "state.db"
+STATE_DIR = LOCAL_ROOT / "state"
+RUNTIME_KIND = "frozen" if getattr(sys, "frozen", False) else "source"
+STATE_NAMESPACE = f"{RUNTIME_KIND}-v{__version__}-p{PARSER_VERSION}"
+STATE_DB = STATE_DIR / f"state-{STATE_NAMESPACE}.db"
 RESEARCH_QUEUE = LOCAL_ROOT / "research-queue.jsonl"
 DASHBOARD_FILE = LOCAL_ROOT / "JobMailDesk.md"
 DASHBOARD_CACHE = LOCAL_ROOT / "dashboard-cache.json"
@@ -188,6 +194,7 @@ def ensure_directories() -> None:
         UNRESOLVED_DIR,
         DIGESTS_DIR,
         LOG_DIR,
+        STATE_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
 

@@ -123,6 +123,46 @@ def test_reviewed_receipt_template_cannot_create_application() -> None:
     assert decision.action == "unresolved"
 
 
+def test_reviewed_receipt_with_job_code_creates_distinct_application() -> None:
+    decision = resolve_event_batch(
+        [
+            event(
+                company="上海合合信息科技股份有限公司",
+                title="感谢您投递合合信息",
+                action="感谢您投递我公司的 27届校招-AI产品经理(J14379) 职位，已收到您的简历。",
+            )
+        ],
+        [],
+        load_identity_dictionaries(),
+    )[0]
+    assert decision.candidate.job_code == "J14379"
+    assert decision.candidate.role == "AI产品经理"
+    assert decision.action == "new_application"
+    assert decision.application_key
+
+
+def test_different_job_codes_do_not_conflict_with_each_other() -> None:
+    decisions = resolve_event_batch(
+        [
+            event(
+                company="上海合合信息科技股份有限公司",
+                title="感谢您投递合合信息",
+                action="感谢您投递我公司的 27届校招-AI产品经理(J14379) 职位。",
+            ),
+            event(
+                company="上海合合信息科技股份有限公司",
+                title="感谢您投递合合信息",
+                action="感谢您投递我公司的 27届校招-产运管培生(J14390) 职位。",
+                received_at=NOW + timedelta(minutes=5),
+            ),
+        ],
+        [],
+        load_identity_dictionaries(),
+    )
+    assert [item.action for item in decisions] == ["new_application", "new_application"]
+    assert decisions[0].application_key != decisions[1].application_key
+
+
 def test_project_codes_and_business_unit_suffixes_are_normalized() -> None:
     jds = event(role=None, project="JDS · 2027校园招聘", event_type="assessment")
     tet = event(role="TET 综合方向", project="2027校园招聘", event_type="assessment")
