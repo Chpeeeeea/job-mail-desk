@@ -494,6 +494,60 @@ def test_reschedule_updates_same_task(tmp_path) -> None:
     assert updated.change_type == "update"
 
 
+def test_later_complete_interview_window_merges_nearby_reminder(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path)
+    reminder = parse_record(
+        mail(
+            "【样例公司】产品经理一面提醒",
+            "应聘岗位：产品经理。面试时间：2026年9月4日 15:10。",
+            "<interview-reminder@example.invalid>",
+        )
+    )
+    assert reminder is not None
+    original = task_from_event(reminder, store)
+    store.save(original)
+
+    schedule = parse_record(
+        mail(
+            "【样例公司】产品经理一面通知",
+            "应聘岗位：产品经理。面试时间：2026年9月4日 15:30-16:00。",
+            "<interview-schedule@example.invalid>",
+        )
+    )
+    assert schedule is not None
+    updated = task_from_event(schedule, store)
+
+    assert updated.id == original.id
+    assert updated.start_at == datetime(2026, 9, 4, 15, 30, tzinfo=SHANGHAI)
+    assert updated.end_at == datetime(2026, 9, 4, 16, 0, tzinfo=SHANGHAI)
+
+
+def test_two_complete_interview_windows_remain_distinct(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path)
+    first = parse_record(
+        mail(
+            "【样例公司】产品经理一面通知",
+            "应聘岗位：产品经理。面试时间：2026年9月4日 15:00-15:30。",
+            "<first-interview-window@example.invalid>",
+        )
+    )
+    assert first is not None
+    original = task_from_event(first, store)
+    store.save(original)
+
+    second = parse_record(
+        mail(
+            "【样例公司】产品经理一面通知",
+            "应聘岗位：产品经理。面试时间：2026年9月4日 15:20-15:50。",
+            "<second-interview-window@example.invalid>",
+        )
+    )
+    assert second is not None
+    separate = task_from_event(second, store)
+
+    assert separate.id != original.id
+
+
 def test_new_source_event_does_not_inherit_completed_state(tmp_path) -> None:
     store = MarkdownTaskStore(tmp_path)
     original = parse_record(

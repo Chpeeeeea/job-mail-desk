@@ -283,7 +283,21 @@ def _same_occurrence(existing: JobTask, event: ParsedEvent) -> bool:
         return False
     existing_times = (existing.start_at, existing.end_at, existing.deadline_at)
     incoming_times = (event.start_at, event.end_at, event.deadline_at)
-    return any(incoming_times) and existing_times == incoming_times
+    if any(incoming_times) and existing_times == incoming_times:
+        return True
+    # A check-in/reminder can quote a nearby arrival time, followed by the
+    # complete interview window in a later message. Merge only when the later
+    # message adds the missing end time; two complete schedules stay distinct.
+    return bool(
+        event.event_type == "interview"
+        and existing.start_at
+        and event.start_at
+        and existing.end_at is None
+        and event.end_at is not None
+        and existing.start_at.astimezone(SHANGHAI).date()
+        == event.start_at.astimezone(SHANGHAI).date()
+        and abs(event.start_at - existing.start_at) <= timedelta(minutes=30)
+    )
 
 
 def _instance_task_id(event: ParsedEvent, app_id: str) -> str:
