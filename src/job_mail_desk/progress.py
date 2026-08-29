@@ -25,6 +25,9 @@ APPLICATION_MARKER = re.compile(
     r"<!--\s*jobmaildesk:application:(?P<id>(?:app-)?[0-9a-f]{20,64})\s*-->"
 )
 JOB_CODE = re.compile(r"\b([A-Za-z]\d{4,})\b", re.IGNORECASE)
+STATUS_DATE = re.compile(r"^(?P<date>约?\d{4}-\d{2}-\d{2})\s*(?P<status>.*)$")
+PROCESS_STAGE_LABELS = ("测评", "笔试", "面试", "群面", "终面")
+ENDED_LABELS = ("已结束", "未通过", "撤回", "关闭", "应聘终止", "已归档")
 
 
 def _application_identity(task: JobTask) -> str:
@@ -159,6 +162,10 @@ def _best_role(chain: list[JobTask]) -> str | None:
 
 def _progress_status(task: JobTask) -> str:
     stage = (task.round or task.stage or "流程").strip()
+    if "已完成" in stage and any(label in stage for label in ("等待后续", "等待结果")):
+        return stage.replace("等待后续", "等待结果")
+    if stage.startswith("等待"):
+        return stage
     if task.event_type == "application" and task.status == "confirmed":
         return f"{task.received_at:%Y-%m-%d} 网申已提交，等待简历筛选"
     if task.status == "done":
@@ -180,6 +187,113 @@ def _progress_status(task: JobTask) -> str:
     if task.status == "expired":
         return f"{stage}已过期"
     return _status_label(task.status)
+
+
+def _status_date(task: JobTask) -> str | None:
+    value = task.completed_at if task.status == "done" and task.completed_at else critical_time(task)
+    if not value:
+        return None
+    prefix = "约" if task.status == "done" and task.completed_at_inferred else ""
+    return f"{prefix}{value.astimezone(SHANGHAI):%Y-%m-%d}"
+
+
+def _split_status_date(value: str) -> tuple[str | None, str]:
+    cleaned = value.strip()
+    match = STATUS_DATE.match(cleaned)
+    if not match:
+        return None, cleaned
+    return match.group("date"), match.group("status").strip()
+
+
+def _ended_reason(value: str) -> str:
+    text = value.strip()
+    parenthetical = re.search(r"未通过[（(]([^）)]*未通过)[）)]", text)
+    if parenthetical:
+        text = parenthetical.group(1)
+    text = re.sub(r"^已结束\s*[:：·-]?\s*", "", text)
+    text = re.sub(r"应聘终止", "未通过", text)
+    text = re.sub(r"已完成(?:，?等待(?:后续|结果))?$", "", text)
+    text = re.sub(r"，?等待(?:后续|结果)$", "", text)
+    text = re.sub(r"[（(]已结束[）)]$", "", text)
+    text = text.strip(" ：:·，,")
+    return text or "流程终止"
+
+
+def _latest_completed_stage(application: dict[str, object]) -> str | None:
+    for event in application.get("history", []):  # type: ignore[union-attr]
+        if event.get("status") != "done":
+            continue
+        stage = str(event.get("round") or event.get("stage") or "").strip()
+        if stage and "等待" not in stage:
+            return stage
+    return None
+
+
+def _canonical_status(
+    value: str,
+    *,
+    application: dict[str, object] | None = None,
+    task: JobTask | None = None,
+) -> dict[str, object]:
+    date_label, status = _split_status_date(value)
+    if task and not date_label:
+        date_label = _status_date(task)
+    prefix = f"{date_label} " if date_label else ""
+
+    if any(label in status for label in ENDED_LABELS):
+        reason = _ended_reason(status)
+        result = "failed" if "未通过" in reason else (
+            "withdrawn" if "撤回" in reason else "closed"
+        )
+        return {
+            "display": f"{prefix}已结束 · {reason}",
+            "application_state": "ended",
+            "stage_state": "completed",
+            "result": result,
+            "status_at": date_label,
+        }
+
+    if "已过期" in status or (task and task.status == "expired"):
+        stage = status.replace("已过期", "").strip(" ：:·，,")
+        stage = stage or ((task.round or task.stage) if task else "当前事项")
+        return {
+            "display": f"{prefix}{stage}已过期 · 待确认",
+            "application_state": "expired",
+            "stage_state": "expired",
+            "result": "pending",
+            "status_at": date_label,
+        }
+
+    completed = "已完成" in status or (task and task.status == "done")
+    if completed:
+        stage = status
+        if "等待" in stage:
+            stage = stage.split("等待", 1)[0].rstrip("，, ")
+        stage = re.sub(r"已完成$", "", stage).strip()
+        if not stage or stage == "后续":
+            stage = _latest_completed_stage(application or {}) or (
+                (task.round or task.stage) if task else "当前环节"
+            )
+        process_completed = any(label in stage for label in PROCESS_STAGE_LABELS)
+        suffix = "已完成，等待结果" if process_completed else "，等待后续"
+        return {
+            "display": f"{prefix}{stage}{suffix}",
+            "application_state": "active",
+            "stage_state": "completed" if process_completed else "waiting",
+            "result": "pending",
+            "status_at": date_label,
+        }
+
+    stage_state = "scheduled" if "已安排" in status else (
+        "waiting" if "等待" in status or "筛选" in status else "active"
+    )
+    return {
+        "display": value.strip(),
+        "application_state": "active",
+        "stage_state": stage_state,
+        "result": "pending",
+        "status_at": date_label,
+    }
 
 
 def sync_task_to_ledger(task: JobTask, path: Path | None) -> int:
@@ -363,8 +477,33 @@ def progress_payload(
             None,
         )
         company, project = normalize_company_project(company, project)
-        applications.append(
+        history = [
             {
+                "task_id": item.id,
+                "stage": item.stage,
+                "round": item.round or "",
+                "status": item.status,
+                "status_label": _status_label(item.status),
+                "time": (
+                    item.completed_at
+                    if item.status == "done" and item.completed_at
+                    else critical_time(item)
+                ).isoformat()
+                if (
+                    (item.status == "done" and item.completed_at)
+                    or critical_time(item)
+                )
+                else None,
+                "action": item.action_summary,
+                "time_inferred": bool(
+                    item.status == "done"
+                    and item.completed_at
+                    and item.completed_at_inferred
+                ),
+            }
+            for item in reversed(chain)
+        ]
+        application: dict[str, object] = {
                 "application_id": app_id,
                 "application_key": current.application_key,
                 "legacy_application_id": current.application_id,
@@ -393,34 +532,19 @@ def progress_payload(
                     else None
                 ),
                 "updated_at": _event_time(current).isoformat(),
-                "history": [
-                    {
-                        "task_id": item.id,
-                        "stage": item.stage,
-                        "round": item.round or "",
-                        "status": item.status,
-                        "status_label": _status_label(item.status),
-                        "time": (
-                            item.completed_at
-                            if item.status == "done" and item.completed_at
-                            else critical_time(item)
-                        ).isoformat()
-                        if (
-                            (item.status == "done" and item.completed_at)
-                            or critical_time(item)
-                        )
-                        else None,
-                        "action": item.action_summary,
-                        "time_inferred": bool(
-                            item.status == "done"
-                            and item.completed_at
-                            and item.completed_at_inferred
-                        ),
-                    }
-                    for item in reversed(chain)
-                ],
+                "history": history,
             }
+        status_meta = _canonical_status(
+            _progress_status(current), application=application, task=current
         )
+        application["current_stage"] = status_meta["display"]
+        application["status_label"] = status_meta["display"]
+        application["application_state"] = status_meta["application_state"]
+        application["stage_state"] = status_meta["stage_state"]
+        application["result"] = status_meta["result"]
+        application["status_at"] = status_meta["status_at"]
+        application["active"] = status_meta["application_state"] == "active"
+        applications.append(application)
 
     task_applications = list(applications)
     ledger_keys: set[tuple[str, str]] = set()
@@ -483,29 +607,29 @@ def progress_payload(
                 # 人工台账是申请结果的权威来源。邮件链可能停留在“测评已完成”
                 # 等历史节点；当台账明确写出未通过、应聘终止或已结束时，
                 # 当前卡片必须展示终止结果，但保留原有 history 供复盘。
-                ledger_ended = any(
-                    label in entry["status"]
-                    for label in (
-                        "已结束",
-                        "未通过",
-                        "撤回",
-                        "关闭",
-                        "应聘终止",
-                        "已过期",
-                        "已归档",
+                if entry["status"]:
+                    status_meta = _canonical_status(
+                        entry["status"], application=application
                     )
-                )
-                if ledger_ended:
-                    application["current_stage"] = entry["status"]
-                    application["current_status"] = "done"
-                    application["status_label"] = entry["status"]
+                    application["current_stage"] = status_meta["display"]
+                    application["status_label"] = status_meta["display"]
+                    application["application_state"] = status_meta[
+                        "application_state"
+                    ]
+                    application["stage_state"] = status_meta["stage_state"]
+                    application["result"] = status_meta["result"]
+                    application["status_at"] = status_meta["status_at"]
                     application["current_action"] = entry["action"]
-                    application["active"] = False
-                    application["next_time"] = None
-                elif entry["status"]:
-                    application["current_stage"] = entry["status"]
-                    application["status_label"] = entry["status"]
-                    application["current_action"] = entry["action"]
+                    application["active"] = (
+                        status_meta["application_state"] == "active"
+                    )
+                    if not application["active"]:
+                        application["next_time"] = None
+                        application["current_status"] = (
+                            "expired"
+                            if status_meta["application_state"] == "expired"
+                            else "done"
+                        )
                 if application["role"] == "岗位待确认" and same_program(application):
                     application["role"] = entry["role"]
             continue
@@ -514,10 +638,9 @@ def progress_payload(
         ledger_key = (company_key, _role_key(entry["role"]))
         if ledger_key in ledger_keys:
             continue
-        ended = any(
-            label in entry["status"]
-            for label in ("已结束", "未通过", "撤回", "关闭", "已归档")
-        )
+        status_meta = _canonical_status(entry["status"])
+        ended = status_meta["application_state"] == "ended"
+        expired = status_meta["application_state"] == "expired"
         identifier = hashlib.sha256(
             f"ledger|{entry['company']}|{entry['role']}".encode("utf-8")
         ).hexdigest()[:20]
@@ -527,10 +650,14 @@ def progress_payload(
                 "company": entry["company"],
                 "role": entry["role"],
                 "project": entry["project"],
-                "current_stage": entry["status"],
+                "current_stage": status_meta["display"],
                 "current_round": "",
-                "current_status": "done" if ended else "tracked",
-                "status_label": entry["status"],
+                "current_status": "done" if ended else ("expired" if expired else "tracked"),
+                "status_label": status_meta["display"],
+                "application_state": status_meta["application_state"],
+                "stage_state": status_meta["stage_state"],
+                "result": status_meta["result"],
+                "status_at": status_meta["status_at"],
                 "received_at": None,
                 "start_at": None,
                 "end_at": None,
@@ -538,7 +665,7 @@ def progress_payload(
                 "completed_at": None,
                 "completed_at_inferred": False,
                 "current_action": entry["action"],
-                "active": not ended,
+                "active": not ended and not expired,
                 "next_time": None,
                 "updated_at": "",
                 "ledger_status": entry["status"],
@@ -548,7 +675,7 @@ def progress_payload(
                         "task_id": None,
                         "stage": entry["status"],
                         "round": "",
-                        "status": "done" if ended else "tracked",
+                        "status": "done" if ended else ("expired" if expired else "tracked"),
                         "status_label": "决策台账",
                         "time": None,
                         "action": entry["action"],

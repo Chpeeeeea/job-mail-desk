@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Iterable
 
 
 class StateVersionMismatch(RuntimeError):
@@ -65,6 +66,64 @@ class StateStore:
                 (message_hash, datetime.now().astimezone().isoformat(), task_id),
             )
             connection.commit()
+
+    def bootstrap_processed_from(
+        self,
+        sources: Iterable[Path],
+        *,
+        parser_version: str,
+    ) -> int:
+        """Copy only deduplication markers from the newest compatible state DB."""
+        with closing(self._connect()) as connection:
+            existing = connection.execute(
+                "SELECT COUNT(*) AS count FROM processed_messages"
+            ).fetchone()
+            if existing and int(existing["count"]):
+                return 0
+
+        for source in sources:
+            if source == self.path or not source.exists():
+                continue
+            try:
+                with closing(sqlite3.connect(source)) as source_connection:
+                    source_connection.row_factory = sqlite3.Row
+                    metadata = source_connection.execute(
+                        "SELECT value FROM metadata WHERE key = 'parser_version'"
+                    ).fetchone()
+                    if not metadata or str(metadata["value"]) != parser_version:
+                        continue
+                    rows = source_connection.execute(
+                        """
+                        SELECT message_hash, processed_at, task_id
+                        FROM processed_messages
+                        """
+                    ).fetchall()
+            except sqlite3.Error:
+                continue
+            if not rows:
+                continue
+            with closing(self._connect()) as connection:
+                connection.executemany(
+                    """
+                    INSERT OR IGNORE INTO processed_messages
+                        (message_hash, processed_at, task_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    [
+                        (row["message_hash"], row["processed_at"], row["task_id"])
+                        for row in rows
+                    ],
+                )
+                connection.execute(
+                    """
+                    INSERT INTO metadata (key, value) VALUES ('dedup_bootstrap_source', ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (source.name,),
+                )
+                connection.commit()
+            return len(rows)
+        return 0
 
     def has_successful_scan(self) -> bool:
         with closing(self._connect()) as connection:

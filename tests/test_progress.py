@@ -41,7 +41,9 @@ def test_progress_groups_application_chain_and_preserves_manual_region(tmp_path)
     interview = task("2", "面试", "planned", 14)
     applications = progress_payload([written, interview])
     assert len(applications) == 1
-    assert applications[0]["current_stage"] == "面试"
+    assert applications[0]["current_stage"] == "一面已安排"
+    assert applications[0]["application_state"] == "active"
+    assert applications[0]["stage_state"] == "scheduled"
     assert [item["stage"] for item in applications[0]["history"]] == [
         "面试",
         "笔试",
@@ -57,7 +59,7 @@ def test_progress_groups_application_chain_and_preserves_manual_region(tmp_path)
     export_progress([written, interview], output)
     refreshed = output.read_text(encoding="utf-8")
     assert "样例公司｜产品经理" in refreshed
-    assert "> [!abstract]- 样例公司｜产品经理 · 面试" in refreshed
+    assert "> [!abstract]- 样例公司｜产品经理 · 一面已安排" in refreshed
     assert "> | 完成时间 | — |" in refreshed
     assert "> **流程记录**" in refreshed
     assert "面试｜一面｜已安排" in refreshed
@@ -180,12 +182,147 @@ def test_ended_ledger_result_overrides_stale_mail_stage(tmp_path) -> None:
     )
     applications = progress_payload([assessment], ledger)
     assert len(applications) == 1
-    assert applications[0]["current_stage"] == "2026-08-05 未通过（简历筛选未通过）"
+    assert applications[0]["current_stage"] == "2026-08-05 已结束 · 简历筛选未通过"
     assert applications[0]["current_status"] == "done"
-    assert applications[0]["status_label"] == "2026-08-05 未通过（简历筛选未通过）"
+    assert applications[0]["status_label"] == "2026-08-05 已结束 · 简历筛选未通过"
+    assert applications[0]["application_state"] == "ended"
+    assert applications[0]["stage_state"] == "completed"
+    assert applications[0]["result"] == "failed"
+    assert applications[0]["status_at"] == "2026-08-05"
     assert applications[0]["active"] is False
     assert applications[0]["next_time"] is None
     assert applications[0]["history"][0]["stage"] == "人才测评"
+
+
+def test_completed_stage_waiting_and_expired_statuses_are_canonical(tmp_path) -> None:
+    completed = task("status", "在线笔试", "done", 12)
+    completed.completed_at = datetime(2026, 8, 28, 20, 0, tzinfo=SHANGHAI)
+    completed.application_key = "app-status"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**2026-08-28 等待后续已完成**｜等待结果 <!-- jobmaildesk:application:app-status -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+
+    application = progress_payload([completed], ledger)[0]
+    assert application["current_stage"] == "2026-08-28 在线笔试已完成，等待结果"
+    assert application["status_label"] == application["current_stage"]
+    assert application["application_state"] == "active"
+    assert application["stage_state"] == "completed"
+    assert application["result"] == "pending"
+
+    expired = task("expiry", "人才测评", "expired", 13)
+    application = progress_payload([expired])[0]
+    assert application["current_stage"] == "2026-08-06 人才测评已过期 · 待确认"
+    assert application["application_state"] == "expired"
+    assert application["stage_state"] == "expired"
+    assert application["active"] is False
+
+
+def test_contradictory_failed_status_is_rendered_as_ended(tmp_path) -> None:
+    assessment = task("failed", "人才测评", "done", 12)
+    assessment.application_key = "app-failed"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**约2026-08-28 人才测评未通过已完成，等待后续**｜停止跟进 <!-- jobmaildesk:application:app-failed -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+
+    application = progress_payload([assessment], ledger)[0]
+    assert application["current_stage"] == "约2026-08-28 已结束 · 人才测评未通过"
+    assert application["application_state"] == "ended"
+    assert application["result"] == "failed"
+    assert application["active"] is False
+
+
+def test_completed_notice_keeps_application_in_progress_without_generic_done() -> None:
+    notice = task("notice", "招聘通知", "done", 12)
+    notice.event_type = "notice"
+    notice.completed_at = datetime(2026, 8, 22, 12, 59, tzinfo=SHANGHAI)
+
+    application = progress_payload([notice])[0]
+    assert application["current_stage"] == "2026-08-22 招聘通知，等待后续"
+    assert application["status_label"] == application["current_stage"]
+    assert application["application_state"] == "active"
+    assert application["stage_state"] == "waiting"
+    assert application["result"] == "pending"
+    assert application["active"] is True
+
+
+def test_application_status_contract_is_company_agnostic(tmp_path) -> None:
+    """Every application follows the same lifecycle contract, regardless of company."""
+    scheduled = task("contract-scheduled", "面试", "planned", 9)
+    completed = task("contract-completed", "人才测评", "done", 10)
+    notice = task("contract-notice", "招聘通知", "done", 11)
+    notice.event_type = "notice"
+    notice.completed_at = datetime(2026, 8, 22, 12, 59, tzinfo=SHANGHAI)
+    expired = task("contract-expired", "人才测评", "expired", 13)
+
+    terminal = task("contract-terminal", "人才测评", "done", 12)
+    terminal.company = "任意公司"
+    terminal.role = "任意岗位"
+    terminal.application_key = "app-contract-terminal"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 任意公司｜任意岗位｜**2026-08-28 人才测评未通过**｜停止跟进 <!-- jobmaildesk:application:app-contract-terminal -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+
+    cases = [
+        (
+            progress_payload([scheduled])[0],
+            ("active", "scheduled", "pending", "一面已安排"),
+        ),
+        (
+            progress_payload([completed])[0],
+            (
+                "active",
+                "completed",
+                "pending",
+                "2026-08-06 人才测评已完成，等待结果",
+            ),
+        ),
+        (
+            progress_payload([notice])[0],
+            ("active", "waiting", "pending", "2026-08-22 招聘通知，等待后续"),
+        ),
+        (
+            progress_payload([terminal], ledger)[0],
+            (
+                "ended",
+                "completed",
+                "failed",
+                "2026-08-28 已结束 · 人才测评未通过",
+            ),
+        ),
+        (
+            progress_payload([expired])[0],
+            (
+                "expired",
+                "expired",
+                "pending",
+                "2026-08-06 人才测评已过期 · 待确认",
+            ),
+        ),
+    ]
+
+    for application, expected in cases:
+        state, stage_state, result, label = expected
+        assert application["application_state"] == state
+        assert application["stage_state"] == stage_state
+        assert application["result"] == result
+        assert application["current_stage"] == label
+        assert application["status_label"] == label
+        assert application["active"] is (state == "active")
 
 
 def test_user_ledger_fields_override_progress_card_with_stable_id(tmp_path) -> None:

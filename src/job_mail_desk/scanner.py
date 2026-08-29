@@ -9,6 +9,7 @@ from .config import (
     APPLICATIONS_DIR,
     DASHBOARD_FILE,
     DICTIONARIES_DIR,
+    RUNTIME_KIND,
     STATE_DB,
     TASKS_DIR,
     UNRESOLVED_DIR,
@@ -84,6 +85,18 @@ def _is_stale_attention(task, now: datetime) -> bool:
         and task.event_type in STALE_EVENT_TYPES
         and critical_time(task) is None
         and task.received_at < now - timedelta(days=STALE_ACTION_DAYS)
+    )
+
+
+def _task_expiry_time(task: JobTask) -> datetime | None:
+    """Expire a task only after its latest meaningful event time."""
+    return max(
+        (
+            value
+            for value in (task.start_at, task.end_at, task.deadline_at)
+            if value is not None
+        ),
+        default=None,
     )
 
 
@@ -390,6 +403,23 @@ def scan_once(
     state = StateStore(STATE_DB)
     try:
         state.prepare_parser_version(PARSER_VERSION)
+        compatible_states = sorted(
+            (
+                path
+                for path in STATE_DB.parent.glob(
+                    f"state-{RUNTIME_KIND}-v*-p{PARSER_VERSION}.db"
+                )
+                if path != STATE_DB
+            ),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        inherited = state.bootstrap_processed_from(
+            compatible_states,
+            parser_version=PARSER_VERSION,
+        )
+        if inherited:
+            LOGGER.info("新版本状态库继承去重基线：%s 条", inherited)
     except StateVersionMismatch:
         LOGGER.exception("扫描已停止：state.db 与当前处理版本不一致")
         raise
@@ -556,7 +586,7 @@ def scan_once(
             tasks = store.all()
             now = datetime.now().astimezone()
             for task in tasks:
-                expires_at = task.end_at or task.deadline_at or task.start_at
+                expires_at = _task_expiry_time(task)
                 if (
                     expires_at
                     and expires_at < now

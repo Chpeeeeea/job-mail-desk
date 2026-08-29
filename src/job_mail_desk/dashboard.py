@@ -74,7 +74,7 @@ def _task_payload(
         "closed": "closed",
     }.get(queue_status, task.research_status)
     result_path = str((research_state or {}).get("result_path") or "")
-    todo_visible = task.status == "done" or (
+    todo_visible = task.status in {"done", "expired"} or (
         task.status in {"confirmed", "planned"}
         and (bool(target) or task.event_type == "manual")
     )
@@ -123,7 +123,7 @@ def dashboard_payload(
     tasks = [
         task
         for task in all_tasks
-        if task.status not in {"cancelled", "expired", "irrelevant"}
+        if task.status not in {"cancelled", "irrelevant"}
     ]
     states = request_states(research_queue)
     payload = [_task_payload(task, now, states.get(task.id)) for task in tasks]
@@ -145,7 +145,7 @@ def dashboard_payload(
             continue
         item["company"] = application.get("company") or item["company"]
         item["role"] = application.get("role") or item["role"]
-        if application.get("active") is False:
+        if application.get("active") is False and item["status"] != "expired":
             item["view"] = "progress"
             item["actionable"] = False
     registry = ApplicationRegistry(APPLICATIONS_DIR)

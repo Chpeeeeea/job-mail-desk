@@ -84,15 +84,15 @@ def test_unchecked_confirmed_task_preserves_progress_status(tmp_path) -> None:
     assert store.load(item.id).status == "confirmed"  # type: ignore[union-attr]
 
 
-def test_expired_task_does_not_enter_todo_export(tmp_path) -> None:
+def test_expired_task_enters_todo_export_for_manual_resolution(tmp_path) -> None:
     item = sample_task()
     item.status = "expired"
     output = tmp_path / "todo.md"
     export_dashboard([item], output, Settings(), now=item.received_at)
 
     content = output.read_text(encoding="utf-8")
-    assert item.company not in content
-    assert "已过期但未完成" not in content
+    assert item.company in content
+    assert "已过期待确认" in content
 
 
 def test_confirmed_application_without_time_stays_out_of_todo(tmp_path) -> None:

@@ -195,6 +195,17 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert 'button.textContent = "再点确认"' in javascript
     assert 'document.createElement("details")' in javascript
     assert 'toggleAll.textContent = allExpanded ? "收起全部" : "展开全部"' in javascript
+    assert '<small>${items.length} 条申请链</small>' in javascript
+    assert 'labels.push(`${counts.active} 进行中`)' in javascript
+    assert 'labels.push(`${counts.expired} 待确认`)' in javascript
+    assert 'labels.push(`${counts.ended} 已结束`)' in javascript
+    assert '条申请链 · ${escapeHtml(stages.join' not in javascript
+    assert '["active", "进行中"]' in javascript
+    assert '["expired", "待确认"]' in javascript
+    assert '["ended", "已结束"]' in javascript
+    assert 'applicationState(application) === state.progressFilter' in javascript
+    assert 'overviewText.textContent = `${allCompanies.size} 家企业 · ${allApplications.length} 条申请链`' in javascript
+    assert ".progress-company-state.attention" in stylesheet
     assert "grid-template-columns: 12px minmax(0, 1fr) max-content" in stylesheet
 
 

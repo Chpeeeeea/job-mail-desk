@@ -152,12 +152,15 @@ def export_dashboard(
             "\n## 手动补充\n\n"
             "<!-- 可在这里添加自己的待办；自动更新不会覆盖本区。 -->\n"
         )
-    buckets = {key: [] for key in ("urgent", "week", "later", "review", "done")}
+    buckets = {
+        key: []
+        for key in ("urgent", "week", "later", "review", "expired", "done")
+    }
     for task in sorted(
         [
             item
             for item in tasks
-            if item.status not in {"cancelled", "expired", "irrelevant"}
+            if item.status not in {"cancelled", "irrelevant"}
             and not (
                 item.event_type == "application"
                 and item.status == "confirmed"
@@ -181,6 +184,7 @@ def export_dashboard(
         ("week", "未来 7 天"),
         ("later", "更晚安排"),
         ("review", "待确认时间"),
+        ("expired", "已过期待确认"),
         ("done", "已完成"),
     ):
         lines.extend(_section(title, buckets[key], settings))

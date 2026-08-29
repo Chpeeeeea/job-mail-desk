@@ -244,3 +244,32 @@ def test_unresolved_store_is_idempotent_and_excludes_private_fields(tmp_path) ->
     assert resolved.status == "resolved"
     assert resolved.resolved_application_key == "app-jds"
     assert resolved.resolved_task_id == "task-1"
+
+    # Reprocessing the same message must not reopen an explicit user decision.
+    store.save(record)
+    preserved = store.load(record.id)
+    assert preserved is not None
+    assert preserved.status == "resolved"
+    assert preserved.resolved_application_key == "app-jds"
+    assert preserved.resolved_task_id == "task-1"
+
+
+def test_scanner_replay_does_not_reopen_ignored_unresolved(tmp_path) -> None:
+    decision = resolve_event_batch(
+        [event(company="样例公司")],
+        [
+            application("app-one", project="项目一", role="产品经理"),
+            application("app-two", project="项目二", role="产品经理"),
+        ],
+        load_identity_dictionaries(),
+    )[0]
+    store = UnresolvedStore(tmp_path)
+    record = unresolved_from_decision("b" * 32, decision)
+    store.save(record)
+    store.ignore(record.id)
+
+    store.save(record)
+
+    preserved = store.load(record.id)
+    assert preserved is not None
+    assert preserved.status == "ignored"

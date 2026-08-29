@@ -10,6 +10,7 @@ const state = {
   setupInitialized: false,
   settingsFirstRun: false,
   reviewFilter: "all",
+  progressFilter: "all",
 };
 
 const cards = document.querySelector("#cards");
@@ -592,16 +593,71 @@ function renderReviewFilterBar(tasks) {
   cards.append(bar);
 }
 
+function companyProgressState(items) {
+  const counts = { active: 0, expired: 0, ended: 0 };
+  items.forEach((application) => {
+    const applicationState = application.application_state
+      || (application.active ? "active" : "ended");
+    if (applicationState === "expired") counts.expired += 1;
+    else if (applicationState === "active") counts.active += 1;
+    else counts.ended += 1;
+  });
+  const labels = [];
+  if (counts.active) labels.push(`${counts.active} 进行中`);
+  if (counts.expired) labels.push(`${counts.expired} 待确认`);
+  if (counts.ended) labels.push(`${counts.ended} 已结束`);
+  return {
+    label: labels.join(" · "),
+    className: counts.active ? "active" : counts.expired ? "attention" : "closed",
+  };
+}
+
+function applicationState(application) {
+  return application.application_state || (application.active ? "active" : "ended");
+}
+
+function renderProgressFilterBar(applications) {
+  const filters = [
+    ["all", "全部"],
+    ["active", "进行中"],
+    ["expired", "待确认"],
+    ["ended", "已结束"],
+  ];
+  const bar = document.createElement("nav");
+  bar.className = "filter-bar progress-filter-bar";
+  filters.forEach(([key, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = key === state.progressFilter ? "active" : "";
+    const count = key === "all"
+      ? applications.length
+      : applications.filter((application) => applicationState(application) === key).length;
+    button.textContent = `${label} ${count}`;
+    button.addEventListener("click", () => {
+      state.progressFilter = key;
+      renderProgress();
+    });
+    bar.append(button);
+  });
+  cards.append(bar);
+}
+
 function renderProgress() {
   cards.replaceChildren();
-  const applications = state.payload.progress || [];
-  if (!applications.length) {
+  const allApplications = state.payload.progress || [];
+  if (!allApplications.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = "暂时没有可汇总的求职流程。";
     cards.append(empty);
     return;
   }
+  const allCompanies = new Set(allApplications.map((application) => application.company));
+  const applications = state.progressFilter === "all"
+    ? allApplications
+    : allApplications.filter(
+      (application) => applicationState(application) === state.progressFilter,
+    );
   const companies = new Map();
   applications.forEach((application) => {
     const group = companies.get(application.company) || [];
@@ -611,9 +667,8 @@ function renderProgress() {
 
   const overview = document.createElement("div");
   overview.className = "progress-overview";
-  const activeCount = applications.filter((application) => application.active).length;
   const overviewText = document.createElement("span");
-  overviewText.textContent = `${companies.size} 家企业 · ${activeCount} 条申请进行中`;
+  overviewText.textContent = `${allCompanies.size} 家企业 · ${allApplications.length} 条申请链`;
   const toggleAll = document.createElement("button");
   const allExpanded = [...companies.keys()].every((company) =>
     state.expandedCompanies.has(company),
@@ -627,6 +682,15 @@ function renderProgress() {
   });
   overview.append(overviewText, toggleAll);
   cards.append(overview);
+  renderProgressFilterBar(allApplications);
+
+  if (!applications.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "当前筛选下没有申请链。";
+    cards.append(empty);
+    return;
+  }
 
   companies.forEach((items, company) => {
     const group = document.createElement("details");
@@ -637,25 +701,18 @@ function renderProgress() {
       else state.expandedCompanies.delete(company);
     });
 
-    const activeItems = items.filter((application) => application.active);
-    const lead = activeItems[0] || items[0];
-    const stages = [...new Set(items.map((application) => {
-      const round = application.current_round
-        ? ` · ${application.current_round}`
-        : "";
-      return `${application.current_stage}${round}`;
-    }))].slice(0, 2);
+    const companyState = companyProgressState(items);
     const summary = document.createElement("summary");
     summary.className = "progress-company-summary";
-    summary.title = `${company}｜${stages.join("；")}`;
+    summary.title = `${company}｜${companyState.label}`;
     summary.innerHTML = `
       <span class="progress-chevron" aria-hidden="true"></span>
       <span class="progress-company-identity">
         <strong>${escapeHtml(company)}</strong>
-        <small>${items.length} 条申请链 · ${escapeHtml(stages.join("；"))}</small>
+        <small>${items.length} 条申请链</small>
       </span>
-      <span class="progress-company-state ${activeItems.length ? "active" : "closed"}">
-        ${activeItems.length ? `${activeItems.length} 进行中` : escapeHtml(lead.status_label)}
+      <span class="progress-company-state ${companyState.className}">
+        ${escapeHtml(companyState.label)}
       </span>
     `;
     const body = document.createElement("div");
@@ -663,7 +720,7 @@ function renderProgress() {
     items.forEach((application) => {
       const card = document.createElement("article");
       card.className = `progress-card ${application.active ? "active" : "closed"}`;
-      const currentRound = application.current_round
+      const currentRound = application.current_round && !application.current_stage.includes(application.current_round)
         ? ` · ${application.current_round}`
         : "";
       const project = application.project ? ` · ${application.project}` : "";

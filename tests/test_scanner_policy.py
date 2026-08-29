@@ -6,6 +6,7 @@ from job_mail_desk.parser import SHANGHAI
 from job_mail_desk.scanner import (
     _effective_lookback_days,
     _is_stale_attention,
+    _task_expiry_time,
 )
 from job_mail_desk import scanner
 from job_mail_desk.state import StateStore
@@ -54,6 +55,33 @@ def test_old_undated_assessment_leaves_attention_views() -> None:
     assert _is_stale_attention(task, now)
     task.status = "confirmed"
     assert not _is_stale_attention(task, now)
+
+
+def test_future_event_outlives_an_earlier_reschedule_deadline() -> None:
+    task = JobTask(
+        id="4" * 24,
+        application_id="5" * 20,
+        company="样例公司",
+        role="产品经理",
+        recruiting_project=None,
+        event_type="interview",
+        stage="群面",
+        round="群面",
+        received_at=datetime(2026, 8, 25, 16, 50, tzinfo=SHANGHAI),
+        start_at=datetime(2026, 8, 29, 15, 15, tzinfo=SHANGHAI),
+        end_at=None,
+        deadline_at=datetime(2026, 8, 27, 16, 0, tzinfo=SHANGHAI),
+        priority="urgent",
+        status="planned",
+        change_type="new",
+        source_message_hash="6" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="群面预约成功",
+        action_summary="参加群面",
+    )
+
+    assert _task_expiry_time(task) == task.start_at
 
 
 def test_one_parser_failure_does_not_abort_the_mail_batch(tmp_path, monkeypatch) -> None:

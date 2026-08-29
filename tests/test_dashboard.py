@@ -7,7 +7,7 @@ from job_mail_desk.parser import SHANGHAI
 from job_mail_desk.unresolved_store import UnresolvedRecord, UnresolvedStore
 
 
-def test_completed_task_stays_in_dashboard_and_active_count_excludes_it(
+def test_completed_stage_stays_visible_while_application_waits_for_result(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -45,7 +45,9 @@ def test_completed_task_stays_in_dashboard_and_active_count_excludes_it(
     assert payload["counts"]["list"] == 0
     assert payload["counts"]["today"] == 0
     assert payload["counts"]["progress"] == 1
-    assert payload["progress"][0]["current_stage"] == "群面"
+    assert payload["progress"][0]["current_stage"] == "2026-08-06 群面已完成，等待结果"
+    assert payload["progress"][0]["application_state"] == "active"
+    assert payload["progress"][0]["active"] is True
 
 
 def test_snoozed_task_leaves_attention_views_but_keeps_event_time() -> None:
@@ -131,7 +133,7 @@ def test_dashboard_cache_reuses_unchanged_snapshot(tmp_path, monkeypatch) -> Non
     assert second == first
 
 
-def test_expired_task_is_hidden_from_action_views_but_kept_in_progress(
+def test_expired_task_is_kept_in_todo_and_progress(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -164,9 +166,12 @@ def test_expired_task_is_hidden_from_action_views_but_kept_in_progress(
     monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
 
     payload = dashboard.dashboard_payload(tmp_path / "research.jsonl")
-    assert payload["tasks"] == []
-    assert payload["counts"]["list"] == 0
-    assert payload["progress"][0]["current_stage"] == "在线笔试"
+    assert len(payload["tasks"]) == 1
+    assert payload["tasks"][0]["status"] == "expired"
+    assert payload["tasks"][0]["actionable"] is True
+    assert payload["counts"]["list"] == 1
+    assert payload["progress"][0]["current_stage"] == "2026-07-21 在线笔试已过期 · 待确认"
+    assert payload["progress"][0]["application_state"] == "expired"
 
 
 def test_unresolved_items_share_the_review_count(tmp_path, monkeypatch) -> None:

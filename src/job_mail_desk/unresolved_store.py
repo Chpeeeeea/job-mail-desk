@@ -158,6 +158,12 @@ class UnresolvedStore:
 
     def save(self, record: UnresolvedRecord) -> Path:
         path = self.path_for(record.id)
+        if path.exists() and record.status == "pending":
+            existing = self.load(record.id)
+            if existing and existing.status in {"resolved", "ignored"}:
+                # A scanner replay may refresh evidence, but it must never
+                # undo a user's explicit identity decision for the same mail.
+                return path
         _atomic_write(path, render_unresolved(record))
         return path
 

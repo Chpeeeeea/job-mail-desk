@@ -631,6 +631,11 @@ dialog::backdrop {
   color: var(--safe);
 }
 
+.progress-company-state.attention {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .progress-company-state.closed {
   background: rgba(37, 35, 31, 0.06);
   color: var(--muted);
