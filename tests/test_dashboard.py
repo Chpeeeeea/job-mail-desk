@@ -42,6 +42,7 @@ def test_completed_stage_stays_visible_while_application_waits_for_result(
     assert [item["id"] for item in payload["tasks"]] == [task.id]
     assert payload["tasks"][0]["status"] == "done"
     assert payload["tasks"][0]["view"] == "progress"
+    assert payload["tasks"][0]["actionable"] is False
     assert payload["counts"]["list"] == 0
     assert payload["counts"]["today"] == 0
     assert payload["counts"]["progress"] == 1

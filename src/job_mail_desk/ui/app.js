@@ -469,7 +469,7 @@ function renderCards() {
     return;
   }
   let tasks = state.view === "list"
-    ? state.payload.tasks.filter((task) => task.actionable)
+    ? state.payload.tasks.filter((task) => task.actionable && task.status !== "done")
     : state.payload.tasks.filter((task) => task.view === state.view);
   let unresolved = [];
   if (state.view === "review") {

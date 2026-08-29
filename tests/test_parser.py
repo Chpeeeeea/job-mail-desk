@@ -230,6 +230,26 @@ def test_netease_business_units_share_parent_but_not_application_chain(tmp_path)
     assert leihuo_task.application_id != interactive_task.application_id
 
 
+def test_netease_parenthesized_business_unit_is_not_parsed_as_recruiting_tail() -> None:
+    event = parse_record(
+        mail(
+            "网易游戏（互娱）2027届校园招聘笔试预告",
+            (
+                "恭喜您通过AI策略运营岗位简历筛选，进入笔试阶段。"
+                "本次笔试预计会在2026年8月30日10:00开展。"
+            ),
+            "<netease-interactive-written@example.invalid>",
+        )
+    )
+
+    assert event is not None
+    assert event.company == "网易游戏"
+    assert event.role == "AI策略运营"
+    assert event.recruiting_project == "互娱事业群 · 2027校园招聘"
+    assert event.stage == "在线笔试"
+    assert event.start_at == datetime(2026, 8, 30, 10, 0, tzinfo=SHANGHAI)
+
+
 def test_netease_pending_application_is_not_marked_submitted(tmp_path) -> None:
     event = parse_record(
         mail(

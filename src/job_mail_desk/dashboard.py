@@ -26,7 +26,7 @@ from .task_service import critical_time
 from .unresolved_store import UnresolvedStore
 
 
-DASHBOARD_CACHE_SCHEMA = 4
+DASHBOARD_CACHE_SCHEMA = 5
 
 
 def _view(task: JobTask, now: datetime) -> str:
@@ -74,7 +74,7 @@ def _task_payload(
         "closed": "closed",
     }.get(queue_status, task.research_status)
     result_path = str((research_state or {}).get("result_path") or "")
-    todo_visible = task.status in {"done", "expired"} or (
+    todo_visible = task.status == "expired" or (
         task.status in {"confirmed", "planned"}
         and (bool(target) or task.event_type == "manual")
     )

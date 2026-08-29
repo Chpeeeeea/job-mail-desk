@@ -80,6 +80,7 @@ DURATION = re.compile(
 )
 ROLE_PATTERNS = (
     re.compile(r"(?:邀请您参加|邀请你参加)\s*([^，。\n]{2,60}?)\s*岗位"),
+    re.compile(r"通过\s*([^，。\n]{2,60}?)\s*岗位(?:简历)?筛选"),
     re.compile(r"(?:您|你)投递的\s*([^，。\n]{2,60}?)\s*职位"),
     re.compile(r"感谢您投递[^\n，。]{2,120}[）)]([^，。]{2,40})，现邀请"),
     re.compile(r"(?:面试职位|应聘职位|职位名称|应聘岗位|岗位名称)\s*[:：]\s*([^\n。；]{2,60})"),
@@ -293,6 +294,17 @@ def _company(subject: str, sender: str) -> str | None:
     )
     if acknowledgement:
         company = canonical_company(acknowledgement.group(1))
+        if company:
+            return company
+    leading = re.match(
+        r"^\s*(?P<company>[\u4e00-\u9fffA-Za-z·.]{2,30}?)"
+        r"(?:[（(][^）)\r\n]{1,20}[）)])?"
+        r"(?:20\d{2}届?)?"
+        r"(?:校园招聘|校招|招聘|邀请|笔试|测评|面试)",
+        subject,
+    )
+    if leading:
+        company = canonical_company(leading.group("company"))
         if company:
             return company
     prefix = re.search(
