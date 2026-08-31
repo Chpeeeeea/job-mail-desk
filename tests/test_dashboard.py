@@ -218,7 +218,7 @@ def test_recently_ignored_task_remains_visible_then_expires(
     assert payload["tasks"][0]["status"] == "irrelevant"
     assert payload["tasks"][0]["view"] == "review"
     assert payload["tasks"][0]["remaining"] == "已忽略"
-    assert payload["counts"]["review"] == 1
+    assert payload["counts"]["review"] == 0
 
 
 def test_dashboard_cache_reuses_unchanged_snapshot(tmp_path, monkeypatch) -> None:

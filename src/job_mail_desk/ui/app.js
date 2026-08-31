@@ -117,8 +117,16 @@ function renderHealth() {
   healthDot.className = "health-dot";
 }
 
+function isActiveUrgent(task) {
+  return (
+    task.priority === "urgent" &&
+    !task.recently_handled &&
+    !["done", "irrelevant", "cancelled"].includes(task.status)
+  );
+}
+
 function renderCapsule() {
-  const urgent = state.payload.tasks.filter((task) => task.priority === "urgent");
+  const urgent = state.payload.tasks.filter(isActiveUrgent);
   const count = urgent.length || state.payload.tasks.length;
   document.querySelector("#capsuleCount").textContent = String(Math.min(count, 9));
   document.querySelector("#capsuleCount").classList.toggle("urgent", urgent.length > 0);
@@ -151,9 +159,7 @@ function renderCounts() {
   ).length;
   document.querySelector("#countReview").textContent = counts.review || 0;
   document.querySelector("#countList").textContent = counts.list || 0;
-  const urgent = state.payload.tasks.filter(
-    (task) => task.priority === "urgent" && task.status !== "done",
-  );
+  const urgent = state.payload.tasks.filter(isActiveUrgent);
   urgentStrip.classList.toggle("hidden", urgent.length === 0);
   urgentStrip.textContent = urgent.length
     ? `⚠ ${urgent.length} 个 24 小时内硬截止，请先核对官方通知`
@@ -201,7 +207,7 @@ function eventNode(task) {
   const event = document.createElement("div");
   event.className = [
     "calendar-event",
-    task.priority === "urgent" ? "urgent" : "",
+    isActiveUrgent(task) ? "urgent" : "",
     task.status === "done" ? "done" : "",
   ].join(" ");
   const time = document.createElement("time");
@@ -336,7 +342,7 @@ function renderMonth() {
     dots.className = "event-dots";
     items.slice(0, 5).forEach((item) => {
       const dot = document.createElement("i");
-      dot.className = `event-dot ${item.priority === "urgent" ? "urgent" : ""}`;
+      dot.className = `event-dot ${isActiveUrgent(item) ? "urgent" : ""}`;
       dots.append(dot);
     });
     cell.append(dots);

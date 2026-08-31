@@ -322,7 +322,7 @@ body.capsule .capsule-view {
   text-decoration: line-through;
 }
 
-.task-card[data-priority="urgent"] {
+.task-card[data-priority="urgent"]:not(.done):not(.recently-handled) {
   border-left-color: var(--accent);
   background: color-mix(in srgb, var(--accent-soft) 34%, var(--paper-raised));
 }

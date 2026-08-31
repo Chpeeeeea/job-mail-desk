@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "job-mail-desk"
-version = "0.6.5"
+version = "0.6.6"
 description = "Privacy-first, Markdown-native job email desk."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

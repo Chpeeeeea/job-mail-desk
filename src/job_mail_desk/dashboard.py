@@ -26,7 +26,7 @@ from .task_service import critical_time
 from .unresolved_store import UnresolvedStore
 
 
-DASHBOARD_CACHE_SCHEMA = 6
+DASHBOARD_CACHE_SCHEMA = 7
 RECENT_HANDLED_WINDOW = timedelta(days=2)
 
 
@@ -225,7 +225,10 @@ def dashboard_payload(
                 item["view"] == "week" and item["status"] != "done"
                 for item in payload
             ),
-            "review": sum(item["view"] == "review" for item in payload)
+            "review": sum(
+                item["view"] == "review" and not item["recently_handled"]
+                for item in payload
+            )
             + len(unresolved),
             "list": sum(
                 item["status"] != "done" and bool(item["actionable"])
