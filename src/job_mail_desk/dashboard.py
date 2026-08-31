@@ -78,6 +78,10 @@ def _task_payload(
             remaining = f"{seconds // 3600} 小时"
         else:
             remaining = f"{seconds // 86400} 天"
+    if task.status == "done":
+        remaining = "已完成"
+    elif task.status == "irrelevant":
+        remaining = "已忽略"
     queue_status = str((research_state or {}).get("status") or "")
     research_status = {
         "pending": "queued",

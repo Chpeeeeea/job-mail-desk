@@ -145,6 +145,7 @@ def test_recently_completed_task_stays_in_review_for_two_days() -> None:
     assert item["recently_handled"] is True
     assert item["view"] == "review"
     assert item["actionable"] is False
+    assert item["remaining"] == "已完成"
 
 
 def test_completed_task_leaves_review_after_two_days() -> None:
@@ -216,6 +217,7 @@ def test_recently_ignored_task_remains_visible_then_expires(
 
     assert payload["tasks"][0]["status"] == "irrelevant"
     assert payload["tasks"][0]["view"] == "review"
+    assert payload["tasks"][0]["remaining"] == "已忽略"
     assert payload["counts"]["review"] == 1
 
 
