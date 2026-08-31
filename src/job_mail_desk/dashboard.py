@@ -26,7 +26,20 @@ from .task_service import critical_time
 from .unresolved_store import UnresolvedStore
 
 
-DASHBOARD_CACHE_SCHEMA = 5
+DASHBOARD_CACHE_SCHEMA = 6
+RECENT_HANDLED_WINDOW = timedelta(days=2)
+
+
+def _recently_handled(task: JobTask, now: datetime) -> bool:
+    handled_at = (
+        task.completed_at
+        if task.status == "done"
+        else task.updated_at if task.status == "irrelevant" else None
+    )
+    if handled_at is None:
+        return False
+    elapsed = now - handled_at.astimezone(SHANGHAI)
+    return timedelta(0) <= elapsed < RECENT_HANDLED_WINDOW
 
 
 def _view(task: JobTask, now: datetime) -> str:
@@ -78,6 +91,7 @@ def _task_payload(
         task.status in {"confirmed", "planned"}
         and (bool(target) or task.event_type == "manual")
     )
+    recently_handled = _recently_handled(task, now)
     return {
         "id": task.id,
         "application_id": task.application_id,
@@ -105,12 +119,13 @@ def _task_payload(
         "action": task.action_summary,
         "manual_notes": task.manual_notes,
         "status": task.status,
+        "recently_handled": recently_handled,
         "priority": task.priority,
         "research_status": research_status,
         "research_result_path": result_path,
         "has_source": bool(task.source_url),
         "actionable": todo_visible,
-        "view": _view(task, now),
+        "view": "review" if recently_handled else _view(task, now),
     }
 
 
@@ -123,7 +138,8 @@ def dashboard_payload(
     tasks = [
         task
         for task in all_tasks
-        if task.status not in {"cancelled", "irrelevant"}
+        if task.status != "cancelled"
+        and (task.status != "irrelevant" or _recently_handled(task, now))
     ]
     states = request_states(research_queue)
     payload = [_task_payload(task, now, states.get(task.id)) for task in tasks]
@@ -205,10 +221,8 @@ def dashboard_payload(
                 item["view"] == "week" and item["status"] != "done"
                 for item in payload
             ),
-            "review": sum(
-                item["view"] == "review" and item["status"] != "done"
-                for item in payload
-            ) + len(unresolved),
+            "review": sum(item["view"] == "review" for item in payload)
+            + len(unresolved),
             "list": sum(
                 item["status"] != "done" and bool(item["actionable"])
                 for item in payload

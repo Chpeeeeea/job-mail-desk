@@ -114,6 +114,111 @@ def test_needs_review_without_time_stays_out_of_todo_list() -> None:
     assert item["actionable"] is False
 
 
+def test_recently_completed_task_stays_in_review_for_two_days() -> None:
+    now = datetime(2026, 8, 31, 20, 0, tzinfo=SHANGHAI)
+    task = JobTask(
+        id="a" * 24,
+        application_id="b" * 20,
+        company="样例公司",
+        role="AI 产品经理",
+        recruiting_project=None,
+        event_type="interview",
+        stage="AI 面试",
+        round=None,
+        received_at=now - timedelta(hours=3),
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        priority="normal",
+        status="done",
+        change_type="new",
+        source_message_hash="c" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="AI 面试通知",
+        action_summary="确认 AI 面试安排",
+        completed_at=now - timedelta(hours=1),
+    )
+
+    item = dashboard._task_payload(task, now)
+
+    assert item["recently_handled"] is True
+    assert item["view"] == "review"
+    assert item["actionable"] is False
+
+
+def test_completed_task_leaves_review_after_two_days() -> None:
+    now = datetime(2026, 8, 31, 20, 0, tzinfo=SHANGHAI)
+    task = JobTask(
+        id="d" * 24,
+        application_id="e" * 20,
+        company="样例公司",
+        role="AI 产品经理",
+        recruiting_project=None,
+        event_type="interview",
+        stage="AI 面试",
+        round=None,
+        received_at=now - timedelta(days=4),
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        priority="normal",
+        status="done",
+        change_type="new",
+        source_message_hash="f" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="AI 面试通知",
+        action_summary="确认 AI 面试安排",
+        completed_at=now - timedelta(days=2),
+    )
+
+    item = dashboard._task_payload(task, now)
+
+    assert item["recently_handled"] is False
+    assert item["view"] == "progress"
+
+
+def test_recently_ignored_task_remains_visible_then_expires(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    store = MarkdownTaskStore(tasks_dir)
+    task = JobTask(
+        id="1" * 24,
+        application_id="2" * 20,
+        company="样例公司",
+        role="产品经理",
+        recruiting_project=None,
+        event_type="assessment",
+        stage="人才测评",
+        round=None,
+        received_at=datetime.now(SHANGHAI),
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        priority="normal",
+        status="irrelevant",
+        change_type="new",
+        source_message_hash="3" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="人才测评通知",
+        action_summary="完成人才测评",
+        updated_at=datetime.now(SHANGHAI) - timedelta(hours=1),
+    )
+    store.save(task)
+    monkeypatch.setattr(dashboard, "TASKS_DIR", tasks_dir)
+    monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
+
+    payload = dashboard.dashboard_payload(tmp_path / "research.jsonl")
+
+    assert payload["tasks"][0]["status"] == "irrelevant"
+    assert payload["tasks"][0]["view"] == "review"
+    assert payload["counts"]["review"] == 1
+
+
 def test_dashboard_cache_reuses_unchanged_snapshot(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(dashboard, "TASKS_DIR", tmp_path / "tasks")
     monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")

@@ -356,6 +356,9 @@ async function handleAction(task, action) {
     const restored = task.time ? "planned" : "needs_review";
     const status = task.status === "done" ? restored : "done";
     state.payload = await window.pywebview.api.update_status(task.id, status);
+  } else if (action === "restore") {
+    const status = task.time ? "planned" : "needs_review";
+    state.payload = await window.pywebview.api.update_status(task.id, status);
   } else if (action === "ignore") {
     state.payload = await window.pywebview.api.update_status(task.id, "irrelevant");
   } else if (action === "source") {
@@ -494,6 +497,7 @@ function renderCards() {
     const node = template.content.firstElementChild.cloneNode(true);
     node.dataset.priority = task.priority;
     node.classList.toggle("done", task.status === "done");
+    node.classList.toggle("recently-handled", Boolean(task.recently_handled));
     node.title = "点击卡片查看和修改详情";
     node.querySelector(".company").textContent = escapeText(task.company);
     node.querySelector(".role").textContent = escapeText(task.role);
@@ -525,10 +529,16 @@ function renderCards() {
         })}`;
     node.querySelector(".action").textContent = escapeText(task.action);
     const doneButton = node.querySelector('[data-action="toggle_done"]');
-    doneButton.textContent = task.status === "done" ? "恢复" : "完成";
-    doneButton.title = task.status === "done"
-      ? "首次点击准备恢复，再点一次执行"
-      : "首次点击准备完成，再点一次执行";
+    if (task.status === "irrelevant") {
+      doneButton.dataset.action = "restore";
+      doneButton.textContent = "撤销忽略";
+      doneButton.title = "恢复到待处理";
+    } else {
+      doneButton.textContent = task.status === "done" ? "撤销完成" : "完成";
+      doneButton.title = task.status === "done"
+        ? "首次点击准备恢复，再点一次执行"
+        : "首次点击准备完成，再点一次执行";
+    }
     const timeButton = node.querySelector('[data-action="edit_time"]');
     timeButton.hidden = Boolean(task.time);
     timeButton.title = "打开详情并补充开始、结束或截止时间";
@@ -539,6 +549,13 @@ function renderCards() {
     sourceButton.title = "打开邮件中提取到的通知或操作链接；不是打开邮箱原文";
     const ignoreButton = node.querySelector('[data-action="ignore"]');
     ignoreButton.title = "两次点击后永久忽略此本地任务；不会修改邮件";
+    if (task.recently_handled) {
+      timeButton.hidden = true;
+      snoozeButton.hidden = true;
+      sourceButton.hidden = true;
+      researchButton.hidden = true;
+      ignoreButton.hidden = true;
+    }
     node.querySelectorAll("[data-action]").forEach((button) => {
       button.addEventListener("click", (eventObject) => {
         eventObject.stopPropagation();

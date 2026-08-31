@@ -310,6 +310,18 @@ body.capsule .capsule-view {
   text-decoration: line-through;
 }
 
+.task-card.recently-handled {
+  border-left-color: var(--line);
+  opacity: 0.62;
+}
+
+.task-card.recently-handled .company,
+.task-card.recently-handled .role,
+.task-card.recently-handled .time-label,
+.task-card.recently-handled .action {
+  text-decoration: line-through;
+}
+
 .task-card[data-priority="urgent"] {
   border-left-color: var(--accent);
   background: color-mix(in srgb, var(--accent-soft) 34%, var(--paper-raised));
