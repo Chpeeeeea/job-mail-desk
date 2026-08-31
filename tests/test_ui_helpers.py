@@ -10,6 +10,7 @@ from job_mail_desk.config import Settings
 from job_mail_desk.markdown_store import MarkdownTaskStore
 from job_mail_desk.models import JobTask
 from job_mail_desk.parser import SHANGHAI
+from job_mail_desk.unresolved_store import UnresolvedRecord, UnresolvedStore
 from job_mail_desk.ui_app import (
     DesktopApi,
     _claim_single_instance,
@@ -100,6 +101,69 @@ def test_status_action_updates_obsidian_checkbox_immediately(tmp_path, monkeypat
     assert f"- [x] **2026-08-06 14:00**" in obsidian.read_text(encoding="utf-8")
     api.update_status(task.id, "planned")
     assert f"- [ ] **2026-08-06 14:00**" in obsidian.read_text(encoding="utf-8")
+
+
+def test_unresolved_without_candidates_can_create_application_and_task(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    applications_dir = tmp_path / "applications"
+    unresolved_dir = tmp_path / "unresolved"
+    monkeypatch.setattr("job_mail_desk.ui_app.TASKS_DIR", tasks_dir)
+    monkeypatch.setattr("job_mail_desk.ui_app.APPLICATIONS_DIR", applications_dir)
+    monkeypatch.setattr("job_mail_desk.ui_app.UNRESOLVED_DIR", unresolved_dir)
+    monkeypatch.setattr("job_mail_desk.ui_app.DASHBOARD_FILE", tmp_path / "local.md")
+    record = UnresolvedRecord(
+        id="a" * 32,
+        status="pending",
+        resolution_status="unresolved",
+        reason="no-candidates",
+        company="样例集团",
+        role="AI 产品经理",
+        recruiting_project="2027 校园招聘",
+        event_type="assessment",
+        stage="人才测评",
+        round=None,
+        received_at=datetime(2026, 8, 31, 9, 0, tzinfo=SHANGHAI),
+        start_at=None,
+        end_at=None,
+        deadline_at=None,
+        action_summary="完成人才测评",
+        title="人才测评通知",
+        requirements=(),
+        confidence=0.8,
+        change_type="new",
+        candidate_application_keys=(),
+        resolved_application_key=None,
+        resolved_task_id=None,
+        rule_version="identity-registry-v1",
+    )
+    UnresolvedStore(unresolved_dir).save(record)
+    api = DesktopApi(Settings())
+    monkeypatch.setattr(api, "get_dashboard", lambda: {"ok": True})
+
+    result = api.resolve_unresolved_new(
+        record.id,
+        {
+            "company": "样例集团",
+            "role": "AI 产品经理",
+            "recruiting_project": "2027 校园招聘",
+            "stage": "人才测评",
+            "deadline_at": "2026-09-01T18:00",
+            "action_summary": "完成人才测评",
+        },
+    )
+
+    resolved = UnresolvedStore(unresolved_dir).load(record.id)
+    tasks = MarkdownTaskStore(tasks_dir).all()
+    applications = list(applications_dir.glob("app-*.md"))
+    assert result == {"ok": True}
+    assert resolved is not None and resolved.status == "resolved"
+    assert len(tasks) == 1
+    assert tasks[0].application_key == resolved.resolved_application_key
+    assert tasks[0].status == "planned"
+    assert len(applications) == 1
 
 
 def test_desktop_bridge_has_no_public_native_window() -> None:

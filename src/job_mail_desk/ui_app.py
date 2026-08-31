@@ -38,7 +38,7 @@ from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
 
 from . import __version__
-from .application_registry import ApplicationRegistry
+from .application_registry import ApplicationRegistry, application_from_progress_entry
 from .config import (
     APPLICATIONS_DIR,
     CONFIG_PATH,
@@ -61,7 +61,7 @@ from .mail_reader import ImapReader
 from .dashboard import cached_dashboard_payload
 from .markdown_store import MarkdownTaskStore
 from .models import ParsedEvent
-from .parser import PARSER_VERSION
+from .parser import PARSER_VERSION, SHANGHAI
 from .research import request_states
 from .progress import create_progress_template
 from .scanner import scan_once
@@ -530,6 +530,113 @@ class DesktopApi:
             application_key=application.application_key,
             resolved_application_id=legacy_id,
         )
+        store.save(task)
+        unresolved_store.resolve(
+            record.id,
+            application_key=application.application_key,
+            task_id=task.id,
+        )
+        self._export(store)
+        return self.get_dashboard()
+
+    def resolve_unresolved_new(
+        self,
+        source_hash: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        """Confirm edited identity and create both the application and task."""
+        unresolved_store = UnresolvedStore(UNRESOLVED_DIR)
+        record = unresolved_store.load(source_hash)
+        if not record or record.status != "pending":
+            raise ValueError("待归属记录不存在或已经处理。")
+
+        company = str(payload.get("company") or "").strip()
+        role = str(payload.get("role") or "").strip()
+        project = str(payload.get("recruiting_project") or "").strip()
+        action = str(
+            payload.get("action_summary")
+            or record.action_summary
+            or "确认后续招聘安排"
+        ).strip()
+        if not company:
+            raise ValueError("请填写公司。")
+        if not role and not project:
+            raise ValueError("请至少填写岗位或招聘项目。")
+
+        application = application_from_progress_entry(
+            {
+                "company": company,
+                "role": role,
+                "project": project,
+                "status": "进行中",
+                "action": action,
+                "application_id": "",
+            }
+        )
+        if application is None:
+            raise ValueError("申请身份信息不足，请补充公司和岗位。")
+        registry = ApplicationRegistry(APPLICATIONS_DIR)
+        existing_application = registry.load(application.application_key)
+        if existing_application:
+            application = existing_application
+            application.company = company
+            application.role = role or application.role
+            application.recruiting_project = project or application.recruiting_project
+            application.status = "active"
+            application.confirmed_by_user = True
+            application.identity_locked = True
+            application.identity_evidence = sorted(
+                set(application.identity_evidence) | {"unresolved-ui-confirmed"}
+            )
+        else:
+            application.source = "unresolved-ui"
+            application.identity_evidence = sorted(
+                set(application.identity_evidence) | {"unresolved-ui-confirmed"}
+            )
+        registry.save(application)
+
+        def parsed_time(name: str) -> datetime | None:
+            value = payload.get(name)
+            if not value:
+                return None
+            parsed = datetime.fromisoformat(str(value))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=SHANGHAI)
+            return parsed.astimezone(SHANGHAI)
+
+        event = ParsedEvent(
+            company=company,
+            role=role or None,
+            recruiting_project=project or None,
+            event_type=record.event_type,
+            stage=str(payload.get("stage") or record.stage).strip(),
+            round=str(payload.get("round") or "").strip() or None,
+            title=record.title or action,
+            start_at=parsed_time("start_at"),
+            end_at=parsed_time("end_at"),
+            deadline_at=parsed_time("deadline_at"),
+            source_message_id=f"unresolved:{record.id}",
+            source_received_at=record.received_at,
+            source_sender="",
+            source_url=None,
+            action_summary=action,
+            requirements=record.requirements,
+            matched_keywords=(),
+            confidence=record.confidence,
+            change_type=record.change_type,  # type: ignore[arg-type]
+        )
+        if event.start_at and event.end_at and event.end_at <= event.start_at:
+            raise ValueError("结束时间必须晚于开始时间。")
+        store = MarkdownTaskStore(TASKS_DIR)
+        task = task_from_event(
+            event,
+            store,
+            application_key=application.application_key,
+            resolved_application_id=legacy_application_id(
+                application.application_key
+            ),
+        )
+        task.manual_notes = str(payload.get("manual_notes") or "").strip()[:2000]
         store.save(task)
         unresolved_store.resolve(
             record.id,

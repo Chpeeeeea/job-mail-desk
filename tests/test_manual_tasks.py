@@ -35,6 +35,50 @@ def test_create_and_edit_manual_markdown_task(tmp_path) -> None:
     assert "已更新" in edited.manual_notes
 
 
+def test_adding_time_promotes_review_task_to_planned(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path)
+    task = create_manual_task(
+        {
+            "company": "样例集团",
+            "role": "AI 产品经理",
+            "stage": "人才测评",
+            "action_summary": "完成人才测评",
+        },
+        store,
+    )
+    assert task.status == "needs_review"
+
+    edited = edit_task_fields(
+        task.id,
+        {
+            "start_at": "2026-08-31T14:18:00+08:00",
+            "end_at": "2026-09-02T14:18:00+08:00",
+        },
+        store,
+    )
+
+    assert edited.status == "planned"
+
+
+def test_clearing_all_times_returns_planned_task_to_review(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path)
+    task = create_manual_task(
+        {
+            "company": "样例集团",
+            "role": "AI 产品经理",
+            "stage": "人才测评",
+            "deadline_at": "2026-09-02T14:18:00+08:00",
+            "action_summary": "完成人才测评",
+        },
+        store,
+    )
+    assert task.status == "planned"
+
+    edited = edit_task_fields(task.id, {"deadline_at": ""}, store)
+
+    assert edited.status == "needs_review"
+
+
 def test_same_manual_event_updates_instead_of_creating_duplicate(tmp_path) -> None:
     store = MarkdownTaskStore(tmp_path)
     payload = {

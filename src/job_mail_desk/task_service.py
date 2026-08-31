@@ -551,11 +551,21 @@ def edit_task_fields(
         task.manual_notes = redact_text(
             str(payload.get("manual_notes") or "")
         )[:2000]
+    time_fields_changed = any(
+        field_name in payload
+        for field_name in ("start_at", "end_at", "deadline_at")
+    )
     for field_name in ("start_at", "end_at", "deadline_at"):
         if field_name in payload:
             setattr(task, field_name, _parse_optional_time(payload[field_name]))
     if task.start_at and task.end_at and task.end_at <= task.start_at:
         raise ValueError("结束时间必须晚于开始时间")
+    if time_fields_changed:
+        has_schedule = bool(task.start_at or task.end_at or task.deadline_at)
+        if has_schedule and task.status in {"new", "needs_review", "confirmed"}:
+            task.status = "planned"
+        elif not has_schedule and task.status == "planned":
+            task.status = "needs_review"
     current = datetime.now(SHANGHAI)
     task.priority = _manual_priority(
         task.start_at,

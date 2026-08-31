@@ -413,7 +413,7 @@ function unresolvedCard(record) {
       <span class="round">身份需要确认</span></div>
     <p class="action">${escapeHtml(record.action_summary || record.title || "请确认这封邮件属于哪条申请链")}</p>
     <div class="unresolved-candidates"></div>
-    <div class="actions"><button data-unresolved-ignore="1" class="muted">忽略</button></div>
+    <div class="actions"><button data-unresolved-edit="1">编辑并归属</button><button data-unresolved-ignore="1" class="muted">忽略</button></div>
   `;
   const candidateBox = card.querySelector(".unresolved-candidates");
   const candidates = (record.candidates || []).map((candidate) => {
@@ -432,8 +432,11 @@ function unresolvedCard(record) {
     label.textContent = "归入申请链：";
     candidateBox.append(label, ...candidates);
   } else {
-    candidateBox.textContent = "请先在求职进展台账中确认申请身份，刷新后再归属。";
+    candidateBox.textContent = "没有可选申请链，可编辑身份后直接建立待办和进展。";
   }
+  card.querySelector("[data-unresolved-edit]").addEventListener("click", () =>
+    showUnresolvedDialog(record),
+  );
   const ignore = card.querySelector("[data-unresolved-ignore]");
   ignore.addEventListener("click", () => {
     if (ignore.dataset.armed === "1") {
@@ -783,9 +786,11 @@ async function showTaskDialog(task = null, focusTime = false) {
     ? "编辑求职任务"
     : "新建求职任务";
   taskForm.elements.task_id.value = task?.id || "";
+  taskForm.elements.unresolved_id.value = "";
   taskForm.elements.company.value = task?.company || "";
   taskForm.elements.role.value =
     task?.role === "岗位待确认" ? "" : task?.role || "";
+  taskForm.elements.recruiting_project.value = task?.project || "";
   taskForm.elements.stage.value = task?.stage || "自定义待办";
   taskForm.elements.round.value = task?.round || "";
   taskForm.elements.start_at.value = inputDate(task?.start_at);
@@ -797,11 +802,34 @@ async function showTaskDialog(task = null, focusTime = false) {
   if (focusTime) taskForm.elements.start_at.focus();
 }
 
+async function showUnresolvedDialog(record) {
+  if (apiReady()) await window.pywebview.api.set_editor_mode(true);
+  taskForm.reset();
+  document.querySelector("#formError").textContent = "";
+  document.querySelector("#dialogTitle").textContent = "编辑并归属";
+  taskForm.elements.task_id.value = "";
+  taskForm.elements.unresolved_id.value = record.id;
+  taskForm.elements.company.value = record.company || "";
+  taskForm.elements.role.value = record.role || "";
+  taskForm.elements.recruiting_project.value = record.recruiting_project || "";
+  taskForm.elements.stage.value = record.stage || "招聘通知";
+  taskForm.elements.round.value = record.round || "";
+  taskForm.elements.start_at.value = inputDate(record.start_at);
+  taskForm.elements.end_at.value = inputDate(record.end_at);
+  taskForm.elements.deadline_at.value = inputDate(record.deadline_at);
+  taskForm.elements.action_summary.value =
+    record.action_summary || record.title || "确认后续招聘安排";
+  taskForm.elements.manual_notes.value = "";
+  taskDialog.showModal();
+  taskForm.elements.company.focus();
+}
+
 function formPayload() {
   return Object.fromEntries(
     [
       "company",
       "role",
+      "recruiting_project",
       "stage",
       "round",
       "start_at",
@@ -817,13 +845,16 @@ async function saveTask(event) {
   event.preventDefault();
   if (!apiReady() || state.saving) return;
   const taskId = taskForm.elements.task_id.value;
+  const unresolvedId = taskForm.elements.unresolved_id.value;
   const submitButton = taskForm.querySelector("button[type='submit']");
   state.saving = true;
   submitButton.disabled = true;
   try {
-    state.payload = taskId
-      ? await window.pywebview.api.edit_task(taskId, formPayload())
-      : await window.pywebview.api.create_task(formPayload());
+    state.payload = unresolvedId
+      ? await window.pywebview.api.resolve_unresolved_new(unresolvedId, formPayload())
+      : taskId
+        ? await window.pywebview.api.edit_task(taskId, formPayload())
+        : await window.pywebview.api.create_task(formPayload());
     taskDialog.close();
     state.calendarInitialized = false;
     initializeCalendarAnchor();
