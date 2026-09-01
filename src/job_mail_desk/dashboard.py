@@ -26,7 +26,7 @@ from .task_service import critical_time
 from .unresolved_store import UnresolvedStore
 
 
-DASHBOARD_CACHE_SCHEMA = 7
+DASHBOARD_CACHE_SCHEMA = 8
 RECENT_HANDLED_WINDOW = timedelta(days=2)
 
 
@@ -165,6 +165,10 @@ def dashboard_payload(
             continue
         item["company"] = application.get("company") or item["company"]
         item["role"] = application.get("role") or item["role"]
+        item["application_state"] = application.get("application_state") or ""
+        item["application_status"] = (
+            application.get("ledger_status") or application.get("current_stage") or ""
+        )
         if application.get("active") is False and item["status"] != "expired":
             item["view"] = "progress"
             item["actionable"] = False

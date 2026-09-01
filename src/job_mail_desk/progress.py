@@ -264,6 +264,15 @@ def _canonical_status(
             "status_at": date_label,
         }
 
+    if "待确认" in status:
+        return {
+            "display": f"{prefix}{status}",
+            "application_state": "pending",
+            "stage_state": "waiting",
+            "result": "pending",
+            "status_at": date_label,
+        }
+
     completed = "已完成" in status or (task and task.status == "done")
     if completed:
         stage = status
@@ -366,11 +375,86 @@ def sync_task_to_ledger(task: JobTask, path: Path | None) -> int:
     if len(candidates) != 1:
         return 0
     index, _line, fields, _checkbox_prefix = candidates[0]
+    existing_status = re.sub(r"[*_`]", "", fields[2]).strip()
+    if _canonical_status(existing_status)["application_state"] == "ended":
+        # The user-maintained ledger is the control plane. A normal scan may
+        # append history, but it must not reopen an explicitly ended chain.
+        return 0
     checked = task.status == "done" or (
         task.event_type == "application" and task.status == "confirmed"
     )
     checkbox_prefix = "- [x] " if checked else "- [ ] "
     fields[2] = f"**{_progress_status(task)}**"
+    lines[index] = (
+        f"{checkbox_prefix}{'｜'.join(fields)} "
+        f"<!-- jobmaildesk:application:{_application_identity(task)} -->"
+    )
+    updated = prefix + marker + "\n".join(lines) + suffix
+    if updated == content:
+        return 0
+    _atomic_write(path, updated)
+    return 1
+
+
+def update_application_status_in_ledger(
+    task: JobTask,
+    path: Path | None,
+    application_state: str,
+    result: str = "",
+) -> int:
+    """Update one application's user-owned status without rewriting task history."""
+    if application_state not in {"active", "pending", "ended"}:
+        raise ValueError(f"不支持的申请链状态：{application_state}")
+    if not path or not path.exists():
+        raise ValueError("未配置可编辑的岗位投递决策台账。")
+    detail = result.strip(" ：:·，,")
+    if application_state == "ended" and not detail:
+        raise ValueError("将申请链设为已结束时，请填写结果或原因。")
+    today = datetime.now(SHANGHAI).date().isoformat()
+    status = {
+        "active": detail or f"{task.round or task.stage}进行中",
+        "pending": detail or f"{task.round or task.stage}待确认",
+        "ended": f"{today} 已结束 · {detail}",
+    }[application_state]
+
+    content = path.read_text(encoding="utf-8")
+    marker = "### 已投递或已进入流程"
+    if marker not in content:
+        raise ValueError("岗位投递决策台账缺少已投递区。")
+    prefix, section_and_suffix = content.split(marker, 1)
+    if "\n### " in section_and_suffix:
+        section, suffix = section_and_suffix.split("\n### ", 1)
+        suffix = "\n### " + suffix
+    else:
+        section, suffix = section_and_suffix, ""
+
+    candidates: list[tuple[int, list[str], str]] = []
+    lines = section.splitlines()
+    for index, line in enumerate(lines):
+        if not re.match(r"^- \[[ xX]\] ", line):
+            continue
+        marker_match = APPLICATION_MARKER.search(line)
+        clean_line = APPLICATION_MARKER.sub("", line).rstrip()
+        fields = clean_line.split("] ", 1)[1].split("｜")
+        if len(fields) < 3:
+            continue
+        marker_id = marker_match.group("id") if marker_match else ""
+        company = re.sub(r"[*_`]", "", fields[0]).strip()
+        role = re.sub(r"[*_`]", "", fields[1]).strip()
+        if marker_id in _task_marker_ids(task):
+            candidates = [(index, fields, clean_line.split("] ", 1)[0] + "] ")]
+            break
+        if (
+            not marker_id
+            and _company_key(company) == _company_key(task.company)
+            and task.role
+            and _same_role(role, task.role)
+        ):
+            candidates.append((index, fields, clean_line.split("] ", 1)[0] + "] "))
+    if len(candidates) != 1:
+        raise ValueError("无法唯一定位对应的申请链，请先确认公司和岗位归属。")
+    index, fields, checkbox_prefix = candidates[0]
+    fields[2] = f"**{status}**"
     lines[index] = (
         f"{checkbox_prefix}{'｜'.join(fields)} "
         f"<!-- jobmaildesk:application:{_application_identity(task)} -->"

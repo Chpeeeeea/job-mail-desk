@@ -109,3 +109,40 @@ def test_agent_list_filters_and_update_requires_exact_id(tmp_path) -> None:
             store=store,
             local_dashboard=tmp_path / "dashboard.md",
         )
+
+
+def test_edit_application_status_ends_chain_without_rewriting_task(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path / "tasks")
+    task = sample_task()
+    store.save(task)
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 京东｜TET 综合方向｜**群面已完成，等待后续**｜保留面试历史 <!-- jobmaildesk:application:bbbbbbbbbbbbbbbbbbbb -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    settings = Settings(
+        progress_enabled=True,
+        progress_output=tmp_path / "求职当前进展.md",
+        progress_source=ledger,
+    )
+
+    apply_task_update(
+        settings,
+        task.id,
+        {"application_state": "ended", "application_result": "群面未通过"},
+        store=store,
+        local_dashboard=tmp_path / "dashboard.md",
+    )
+
+    saved = store.load(task.id)
+    assert saved is not None
+    assert saved.status == "planned"
+    assert saved.stage == "群面"
+    assert "已结束 · 群面未通过" in ledger.read_text(encoding="utf-8")
+    assert "保留面试历史" in ledger.read_text(encoding="utf-8")
+    assert "已结束 · 群面未通过" in settings.progress_output.read_text(
+        encoding="utf-8"
+    )

@@ -500,6 +500,7 @@ dialog::backdrop {
 }
 
 #taskForm input,
+#taskForm select,
 #taskForm textarea {
   width: 100%;
   padding: 8px 9px;
@@ -512,6 +513,7 @@ dialog::backdrop {
 }
 
 #taskForm input:focus,
+#taskForm select:focus,
 #taskForm textarea:focus {
   border-color: var(--accent);
 }
@@ -669,6 +671,10 @@ dialog::backdrop {
 
 .progress-card.closed {
   border-left-color: var(--line);
+}
+
+.progress-card.attention {
+  border-left-color: var(--accent);
 }
 
 .progress-head {

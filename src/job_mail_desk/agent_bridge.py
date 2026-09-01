@@ -5,7 +5,11 @@ from pathlib import Path
 from .config import DASHBOARD_FILE, TASKS_DIR, Settings
 from .exporter import export_dashboard
 from .markdown_store import MarkdownTaskStore
-from .progress import export_progress, sync_task_to_ledger
+from .progress import (
+    export_progress,
+    sync_task_to_ledger,
+    update_application_status_in_ledger,
+)
 from .research import close_requests_for_task
 from .task_service import critical_time, edit_task_fields
 
@@ -100,6 +104,8 @@ def apply_task_update(
     if not task:
         raise KeyError(f"未找到任务：{task_id}")
     status_value = str(changes.pop("status", "") or "").strip()
+    application_state = str(changes.pop("application_state", "") or "").strip()
+    application_result = str(changes.pop("application_result", "") or "").strip()
     editable = {
         key: value
         for key, value in changes.items()
@@ -119,6 +125,13 @@ def apply_task_update(
     }
     if editable:
         task = edit_task_fields(task_id, editable, target_store)
+    if application_state:
+        update_application_status_in_ledger(
+            task,
+            settings.progress_source,
+            application_state,
+            application_result,
+        )
     if status_value:
         if status_value not in ALLOWED_STATUSES:
             raise ValueError(f"不支持的状态：{status_value}")

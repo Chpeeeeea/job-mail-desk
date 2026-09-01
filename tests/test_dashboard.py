@@ -212,6 +212,8 @@ def test_recently_ignored_task_remains_visible_then_expires(
     store.save(task)
     monkeypatch.setattr(dashboard, "TASKS_DIR", tasks_dir)
     monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
+    monkeypatch.setattr(dashboard, "UNRESOLVED_DIR", tmp_path / "unresolved")
+    monkeypatch.setattr(dashboard, "APPLICATIONS_DIR", tmp_path / "applications")
 
     payload = dashboard.dashboard_payload(tmp_path / "research.jsonl")
 

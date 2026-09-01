@@ -194,6 +194,24 @@ def test_ended_ledger_result_overrides_stale_mail_stage(tmp_path) -> None:
     assert applications[0]["history"][0]["stage"] == "人才测评"
 
 
+def test_scanner_sync_does_not_reopen_user_ended_application(tmp_path) -> None:
+    completed = task("ended-control", "一面", "done", 12)
+    completed.application_key = "app-ended-control"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**2026-09-01 已结束 · 一面未通过**｜停止跟进 <!-- jobmaildesk:application:app-ended-control -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+
+    assert sync_task_to_ledger(completed, ledger) == 0
+    content = ledger.read_text(encoding="utf-8")
+    assert "2026-09-01 已结束 · 一面未通过" in content
+    assert "一面已完成，等待后续" not in content
+
+
 def test_completed_stage_waiting_and_expired_statuses_are_canonical(tmp_path) -> None:
     completed = task("status", "在线笔试", "done", 12)
     completed.completed_at = datetime(2026, 8, 28, 20, 0, tzinfo=SHANGHAI)
@@ -220,6 +238,19 @@ def test_completed_stage_waiting_and_expired_statuses_are_canonical(tmp_path) ->
     assert application["application_state"] == "expired"
     assert application["stage_state"] == "expired"
     assert application["active"] is False
+
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**2026-08-29 群面待确认**｜等待人工确认 <!-- jobmaildesk:application:app-status -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    pending = progress_payload([completed], ledger)[0]
+    assert pending["current_stage"] == "2026-08-29 群面待确认"
+    assert pending["application_state"] == "pending"
+    assert pending["stage_state"] == "waiting"
+    assert pending["active"] is False
 
 
 def test_contradictory_failed_status_is_rendered_as_ended(tmp_path) -> None:

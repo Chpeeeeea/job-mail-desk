@@ -624,7 +624,7 @@ function companyProgressState(items) {
   items.forEach((application) => {
     const applicationState = application.application_state
       || (application.active ? "active" : "ended");
-    if (applicationState === "expired") counts.expired += 1;
+    if (["pending", "expired"].includes(applicationState)) counts.expired += 1;
     else if (applicationState === "active") counts.active += 1;
     else counts.ended += 1;
   });
@@ -642,6 +642,11 @@ function applicationState(application) {
   return application.application_state || (application.active ? "active" : "ended");
 }
 
+function progressFilterState(application) {
+  const current = applicationState(application);
+  return current === "pending" ? "expired" : current;
+}
+
 function renderProgressFilterBar(applications) {
   const filters = [
     ["all", "全部"],
@@ -657,7 +662,7 @@ function renderProgressFilterBar(applications) {
     button.className = key === state.progressFilter ? "active" : "";
     const count = key === "all"
       ? applications.length
-      : applications.filter((application) => applicationState(application) === key).length;
+      : applications.filter((application) => progressFilterState(application) === key).length;
     button.textContent = `${label} ${count}`;
     button.addEventListener("click", () => {
       state.progressFilter = key;
@@ -682,7 +687,7 @@ function renderProgress() {
   const applications = state.progressFilter === "all"
     ? allApplications
     : allApplications.filter(
-      (application) => applicationState(application) === state.progressFilter,
+      (application) => progressFilterState(application) === state.progressFilter,
     );
   const companies = new Map();
   applications.forEach((application) => {
@@ -745,7 +750,8 @@ function renderProgress() {
     body.className = "progress-company-body";
     items.forEach((application) => {
       const card = document.createElement("article");
-      card.className = `progress-card ${application.active ? "active" : "closed"}`;
+      const cardState = applicationState(application);
+      card.className = `progress-card ${cardState === "active" ? "active" : ["pending", "expired"].includes(cardState) ? "attention" : "closed"}`;
       const currentRound = application.current_round && !application.current_stage.includes(application.current_round)
         ? ` · ${application.current_round}`
         : "";
@@ -816,6 +822,8 @@ async function showTaskDialog(task = null, focusTime = false) {
   taskForm.elements.recruiting_project.value = task?.project || "";
   taskForm.elements.stage.value = task?.stage || "自定义待办";
   taskForm.elements.round.value = task?.round || "";
+  taskForm.elements.application_state.value = "";
+  taskForm.elements.application_result.value = "";
   taskForm.elements.start_at.value = inputDate(task?.start_at);
   taskForm.elements.end_at.value = inputDate(task?.end_at);
   taskForm.elements.deadline_at.value = inputDate(task?.deadline_at);
@@ -837,6 +845,8 @@ async function showUnresolvedDialog(record) {
   taskForm.elements.recruiting_project.value = record.recruiting_project || "";
   taskForm.elements.stage.value = record.stage || "招聘通知";
   taskForm.elements.round.value = record.round || "";
+  taskForm.elements.application_state.value = "";
+  taskForm.elements.application_result.value = "";
   taskForm.elements.start_at.value = inputDate(record.start_at);
   taskForm.elements.end_at.value = inputDate(record.end_at);
   taskForm.elements.deadline_at.value = inputDate(record.deadline_at);
@@ -855,6 +865,8 @@ function formPayload() {
       "recruiting_project",
       "stage",
       "round",
+      "application_state",
+      "application_result",
       "start_at",
       "end_at",
       "deadline_at",
@@ -870,6 +882,14 @@ async function saveTask(event) {
   const taskId = taskForm.elements.task_id.value;
   const unresolvedId = taskForm.elements.unresolved_id.value;
   const submitButton = taskForm.querySelector("button[type='submit']");
+  if (
+    taskForm.elements.application_state.value === "ended" &&
+    !taskForm.elements.application_result.value.trim()
+  ) {
+    document.querySelector("#formError").textContent =
+      "将申请链设为已结束时，请填写结果或原因。";
+    return;
+  }
   state.saving = true;
   submitButton.disabled = true;
   try {

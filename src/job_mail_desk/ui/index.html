@@ -103,6 +103,15 @@
           <label>阶段<input name="stage" value="自定义待办" maxlength="40"></label>
           <label>轮次<input name="round" maxlength="30"></label>
         </div>
+        <div class="form-row application-status-row">
+          <label>申请链状态<select name="application_state">
+            <option value="">不修改</option>
+            <option value="active">进行中</option>
+            <option value="pending">待确认</option>
+            <option value="ended">已结束</option>
+          </select></label>
+          <label>结果 / 说明<input name="application_result" maxlength="80" placeholder="如：一面未通过"></label>
+        </div>
         <div class="form-row">
           <label>开始<input name="start_at" type="datetime-local"></label>
           <label>结束<input name="end_at" type="datetime-local"></label>

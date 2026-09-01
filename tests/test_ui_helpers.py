@@ -224,6 +224,11 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     )
     assert 'data-action="confirm"' not in html
     assert 'data-action="edit_time"' in html
+    assert 'name="application_state"' in html
+    assert 'name="application_result"' in html
+    assert 'value="ended"' in html
+    assert '"application_state"' in javascript
+    assert '"application_result"' in javascript
     assert '>邮件链接<' in html
     assert 'id="settingsDialog"' in html
     assert 'name="mail_provider"' in html
@@ -267,7 +272,7 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert '["active", "进行中"]' in javascript
     assert '["expired", "待确认"]' in javascript
     assert '["ended", "已结束"]' in javascript
-    assert 'applicationState(application) === state.progressFilter' in javascript
+    assert 'progressFilterState(application) === state.progressFilter' in javascript
     assert 'overviewText.textContent = `${allCompanies.size} 家企业 · ${allApplications.length} 条申请链`' in javascript
     assert ".progress-company-state.attention" in stylesheet
     assert "grid-template-columns: 12px minmax(0, 1fr) max-content" in stylesheet
