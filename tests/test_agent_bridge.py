@@ -146,3 +146,35 @@ def test_edit_application_status_ends_chain_without_rewriting_task(tmp_path) -> 
     assert "已结束 · 群面未通过" in settings.progress_output.read_text(
         encoding="utf-8"
     )
+
+
+def test_edit_application_status_can_mark_offer(tmp_path) -> None:
+    store = MarkdownTaskStore(tmp_path / "tasks")
+    task = sample_task()
+    store.save(task)
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 京东｜TET 综合方向｜**终面已完成，等待结果**｜保留历史 <!-- jobmaildesk:application:bbbbbbbbbbbbbbbbbbbb -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    settings = Settings(
+        progress_enabled=True,
+        progress_output=tmp_path / "求职当前进展.md",
+        progress_source=ledger,
+    )
+
+    apply_task_update(
+        settings,
+        task.id,
+        {"application_state": "offered", "application_result": "已确认录用"},
+        store=store,
+        local_dashboard=tmp_path / "dashboard.md",
+    )
+
+    assert store.load(task.id).status == "planned"
+    assert "已 Offer · 已确认录用" in ledger.read_text(encoding="utf-8")
+    progress = settings.progress_output.read_text(encoding="utf-8")
+    assert "已 Offer · 已确认录用" in progress

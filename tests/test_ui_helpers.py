@@ -227,6 +227,7 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert 'name="application_state"' in html
     assert 'name="application_result"' in html
     assert 'value="ended"' in html
+    assert 'value="offered"' in html
     assert '"application_state"' in javascript
     assert '"application_result"' in javascript
     assert '>邮件链接<' in html
@@ -268,10 +269,12 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert 'labels.push(`${counts.active} 进行中`)' in javascript
     assert 'labels.push(`${counts.expired} 待确认`)' in javascript
     assert 'labels.push(`${counts.ended} 已结束`)' in javascript
+    assert 'labels.push(`${counts.offered} 已 Offer`)' in javascript
     assert '条申请链 · ${escapeHtml(stages.join' not in javascript
     assert '["active", "进行中"]' in javascript
     assert '["expired", "待确认"]' in javascript
     assert '["ended", "已结束"]' in javascript
+    assert '["offered", "已 Offer"]' in javascript
     assert 'progressFilterState(application) === state.progressFilter' in javascript
     assert 'overviewText.textContent = `${allCompanies.size} 家企业 · ${allApplications.length} 条申请链`' in javascript
     assert ".progress-company-state.attention" in stylesheet

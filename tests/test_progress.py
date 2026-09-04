@@ -212,6 +212,52 @@ def test_scanner_sync_does_not_reopen_user_ended_application(tmp_path) -> None:
     assert "一面已完成，等待后续" not in content
 
 
+def test_offer_is_success_terminal_and_scanner_cannot_reopen_it(tmp_path) -> None:
+    completed = task("offer-control", "终面", "done", 12)
+    completed.application_key = "app-offer-control"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**2026-09-04 已 Offer**｜等待入职 <!-- jobmaildesk:application:app-offer-control -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+
+    application = progress_payload([completed], ledger)[0]
+    assert application["current_stage"] == "2026-09-04 已 Offer"
+    assert application["application_state"] == "offered"
+    assert application["result"] == "offered"
+    assert application["active"] is False
+    assert sync_task_to_ledger(completed, ledger) == 0
+    assert "2026-09-04 已 Offer" in ledger.read_text(encoding="utf-8")
+
+
+def test_offer_words_without_success_confirmation_are_not_offered(tmp_path) -> None:
+    waiting = task("offer-wait", "终面", "done", 12)
+    waiting.application_key = "app-offer-wait"
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**等待 Offer 审批**｜等待结果 <!-- jobmaildesk:application:app-offer-wait -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    assert progress_payload([waiting], ledger)[0]["application_state"] == "active"
+
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 样例公司｜产品经理｜**Offer 未通过**｜停止跟进 <!-- jobmaildesk:application:app-offer-wait -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    application = progress_payload([waiting], ledger)[0]
+    assert application["application_state"] == "ended"
+    assert application["result"] == "failed"
+
+
 def test_completed_stage_waiting_and_expired_statuses_are_canonical(tmp_path) -> None:
     completed = task("status", "在线笔试", "done", 12)
     completed.completed_at = datetime(2026, 8, 28, 20, 0, tzinfo=SHANGHAI)
@@ -441,6 +487,21 @@ def test_decision_ledger_adds_companies_without_mail_tasks(tmp_path) -> None:
     assert applications[0]["active"] is True
     assert applications[1]["active"] is True
     assert applications[2]["active"] is False
+
+
+def test_offer_only_ledger_row_is_success_terminal(tmp_path) -> None:
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 帆软｜产品经理｜**2026-09-04 已 Offer**｜等待入职
+""",
+        encoding="utf-8",
+    )
+
+    application = progress_payload([], ledger)[0]
+    assert application["application_state"] == "offered"
+    assert application["current_status"] == "done"
+    assert application["active"] is False
 
 
 def test_ignored_company_is_not_reintroduced_from_ledger(tmp_path) -> None:

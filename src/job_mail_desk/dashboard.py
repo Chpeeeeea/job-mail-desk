@@ -26,7 +26,7 @@ from .task_service import critical_time
 from .unresolved_store import UnresolvedStore
 
 
-DASHBOARD_CACHE_SCHEMA = 8
+DASHBOARD_CACHE_SCHEMA = 9
 RECENT_HANDLED_WINDOW = timedelta(days=2)
 
 

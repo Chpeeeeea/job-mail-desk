@@ -253,6 +253,21 @@ def _canonical_status(
             "status_at": date_label,
         }
 
+    offer_match = re.search(
+        r"(?i)已\s*(?:获|拿到|收到)?\s*offer(?:ed)?|"
+        r"offer\s*(?:已发放|已确认|已接受)|已录用|已获录用|录用通知已收到",
+        status,
+    )
+    if offer_match:
+        detail = status[offer_match.end() :].strip(" ：:·，,")
+        return {
+            "display": f"{prefix}已 Offer" + (f" · {detail}" if detail else ""),
+            "application_state": "offered",
+            "stage_state": "completed",
+            "result": "offered",
+            "status_at": date_label,
+        }
+
     if "已过期" in status or (task and task.status == "expired"):
         stage = status.replace("已过期", "").strip(" ：:·，,")
         stage = stage or ((task.round or task.stage) if task else "当前事项")
@@ -376,7 +391,10 @@ def sync_task_to_ledger(task: JobTask, path: Path | None) -> int:
         return 0
     index, _line, fields, _checkbox_prefix = candidates[0]
     existing_status = re.sub(r"[*_`]", "", fields[2]).strip()
-    if _canonical_status(existing_status)["application_state"] == "ended":
+    if _canonical_status(existing_status)["application_state"] in {
+        "ended",
+        "offered",
+    }:
         # The user-maintained ledger is the control plane. A normal scan may
         # append history, but it must not reopen an explicitly ended chain.
         return 0
@@ -403,7 +421,7 @@ def update_application_status_in_ledger(
     result: str = "",
 ) -> int:
     """Update one application's user-owned status without rewriting task history."""
-    if application_state not in {"active", "pending", "ended"}:
+    if application_state not in {"active", "pending", "ended", "offered"}:
         raise ValueError(f"不支持的申请链状态：{application_state}")
     if not path or not path.exists():
         raise ValueError("未配置可编辑的岗位投递决策台账。")
@@ -415,6 +433,7 @@ def update_application_status_in_ledger(
         "active": detail or f"{task.round or task.stage}进行中",
         "pending": detail or f"{task.round or task.stage}待确认",
         "ended": f"{today} 已结束 · {detail}",
+        "offered": f"{today} 已 Offer" + (f" · {detail}" if detail else ""),
     }[application_state]
 
     content = path.read_text(encoding="utf-8")
@@ -723,7 +742,7 @@ def progress_payload(
         if ledger_key in ledger_keys:
             continue
         status_meta = _canonical_status(entry["status"])
-        ended = status_meta["application_state"] == "ended"
+        ended = status_meta["application_state"] in {"ended", "offered"}
         expired = status_meta["application_state"] == "expired"
         identifier = hashlib.sha256(
             f"ledger|{entry['company']}|{entry['role']}".encode("utf-8")

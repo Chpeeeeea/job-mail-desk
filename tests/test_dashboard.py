@@ -370,3 +370,54 @@ def test_terminal_ledger_status_removes_task_from_action_views(
     assert payload["tasks"][0]["view"] == "progress"
     assert payload["tasks"][0]["actionable"] is False
     assert payload["counts"]["today"] == 0
+
+
+def test_offer_ledger_status_removes_task_from_action_views(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    store = MarkdownTaskStore(tasks_dir)
+    task = JobTask(
+        id="f" * 24,
+        application_id="1" * 20,
+        application_key="app-offer-dashboard-1234",
+        company="帆软",
+        role="产品经理",
+        recruiting_project=None,
+        event_type="interview",
+        stage="终面",
+        round="终面",
+        received_at=datetime(2026, 9, 1, 8, 0, tzinfo=SHANGHAI),
+        start_at=datetime(2026, 9, 1, 10, 0, tzinfo=SHANGHAI),
+        end_at=None,
+        deadline_at=None,
+        priority="high",
+        status="done",
+        change_type="new",
+        source_message_hash="2" * 32,
+        research_status="closed",
+        confidence=1.0,
+        title="终面",
+        action_summary="参加终面",
+        completed_at=datetime(2026, 9, 1, 12, 0, tzinfo=SHANGHAI),
+    )
+    store.save(task)
+    ledger = tmp_path / "台账.md"
+    ledger.write_text(
+        """### 已投递或已进入流程
+- [x] 帆软｜产品经理｜**2026-09-04 已 Offer**｜等待入职 <!-- jobmaildesk:application:app-offer-dashboard-1234 -->
+### 当前优先待投
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dashboard, "TASKS_DIR", tasks_dir)
+    monkeypatch.setattr(dashboard, "STATE_DB", tmp_path / "state.db")
+    monkeypatch.setattr(dashboard, "UNRESOLVED_DIR", tmp_path / "unresolved")
+    monkeypatch.setattr(dashboard, "APPLICATIONS_DIR", tmp_path / "applications")
+
+    payload = dashboard.dashboard_payload(tmp_path / "research.jsonl", ledger)
+    assert payload["progress"][0]["application_state"] == "offered"
+    assert payload["tasks"][0]["view"] == "progress"
+    assert payload["tasks"][0]["actionable"] is False
+    assert payload["counts"]["today"] == 0

@@ -127,6 +127,32 @@ def test_duplicate_identity_merges_terminal_status(tmp_path) -> None:
     assert records[0].status == "ended"
 
 
+def test_offer_is_terminal_in_identity_registry(tmp_path) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        """# 台账
+
+### 已投递或已进入流程
+- [x] 帆软｜产品经理｜**2026-09-04 已 Offer**｜等待入职
+""",
+        encoding="utf-8",
+    )
+
+    records = preview_progress_applications(ledger)
+    assert len(records) == 1
+    assert records[0].status == "ended"
+
+    ledger.write_text(
+        """# 台账
+
+### 已投递或已进入流程
+- [x] 帆软｜产品经理｜**等待 Offer 审批**｜等待结果
+""",
+        encoding="utf-8",
+    )
+    assert preview_progress_applications(ledger)[0].status == "active"
+
+
 def test_unidentified_placeholder_row_is_not_locked_or_imported(tmp_path) -> None:
     ledger = tmp_path / "ledger.md"
     ledger.write_text(

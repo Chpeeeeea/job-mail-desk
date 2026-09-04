@@ -150,9 +150,24 @@ def application_from_progress_entry(
         job_code=job_code,
         legacy_application_id=legacy_id or None,
     )
-    ended = any(
-        label in (entry.get("status") or "")
-        for label in ("已结束", "未通过", "撤回", "关闭", "已过期", "已归档")
+    status_text = entry.get("status") or ""
+    offered = bool(
+        re.search(
+            r"(?i)已\s*(?:获|拿到|收到)?\s*offer(?:ed)?|"
+            r"offer\s*(?:已发放|已确认|已接受)|已录用|已获录用|录用通知已收到",
+            status_text,
+        )
+    )
+    ended = offered or any(
+        label in status_text
+        for label in (
+            "已结束",
+            "未通过",
+            "撤回",
+            "关闭",
+            "已过期",
+            "已归档",
+        )
     )
     return ApplicationRecord(
         application_key=key,
