@@ -645,11 +645,6 @@ dialog::backdrop {
   color: var(--safe);
 }
 
-.progress-company-state.attention {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
 .progress-company-state.offered {
   background: rgba(85, 121, 98, 0.18);
   color: var(--safe);
@@ -676,10 +671,6 @@ dialog::backdrop {
 
 .progress-card.closed {
   border-left-color: var(--line);
-}
-
-.progress-card.attention {
-  border-left-color: var(--accent);
 }
 
 .progress-card.offered {

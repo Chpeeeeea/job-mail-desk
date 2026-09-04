@@ -620,29 +620,25 @@ function renderReviewFilterBar(tasks) {
 }
 
 function companyProgressState(items) {
-  const counts = { active: 0, expired: 0, ended: 0, offered: 0 };
+  const counts = { active: 0, ended: 0, offered: 0 };
   items.forEach((application) => {
     const applicationState = application.application_state
       || (application.active ? "active" : "ended");
-    if (["pending", "expired"].includes(applicationState)) counts.expired += 1;
-    else if (applicationState === "active") counts.active += 1;
-    else if (applicationState === "offered") counts.offered += 1;
-    else counts.ended += 1;
+    if (applicationState === "offered") counts.offered += 1;
+    else if (applicationState === "ended") counts.ended += 1;
+    else counts.active += 1;
   });
   const labels = [];
   if (counts.active) labels.push(`${counts.active} 进行中`);
-  if (counts.expired) labels.push(`${counts.expired} 待确认`);
   if (counts.offered) labels.push(`${counts.offered} 已 Offer`);
   if (counts.ended) labels.push(`${counts.ended} 已结束`);
   return {
     label: labels.join(" · "),
     className: counts.active
       ? "active"
-      : counts.expired
-        ? "attention"
-        : counts.offered
-          ? "offered"
-          : "closed",
+      : counts.offered
+        ? "offered"
+        : "closed",
   };
 }
 
@@ -652,14 +648,13 @@ function applicationState(application) {
 
 function progressFilterState(application) {
   const current = applicationState(application);
-  return current === "pending" ? "expired" : current;
+  return ["offered", "ended"].includes(current) ? current : "active";
 }
 
 function renderProgressFilterBar(applications) {
   const filters = [
     ["all", "全部"],
     ["active", "进行中"],
-    ["expired", "待确认"],
     ["offered", "已 Offer"],
     ["ended", "已结束"],
   ];
@@ -759,8 +754,8 @@ function renderProgress() {
     body.className = "progress-company-body";
     items.forEach((application) => {
       const card = document.createElement("article");
-      const cardState = applicationState(application);
-      card.className = `progress-card ${cardState === "active" ? "active" : ["pending", "expired"].includes(cardState) ? "attention" : cardState === "offered" ? "offered" : "closed"}`;
+      const cardState = progressFilterState(application);
+      card.className = `progress-card ${cardState === "offered" ? "offered" : cardState === "ended" ? "closed" : "active"}`;
       const currentRound = application.current_round && !application.current_stage.includes(application.current_round)
         ? ` · ${application.current_round}`
         : "";
