@@ -94,12 +94,13 @@
         </div>
         <input type="hidden" name="task_id">
         <input type="hidden" name="unresolved_id">
+        <input type="hidden" name="application_id">
         <div class="identity-row">
           <label>公司 / 事项<input name="company" required maxlength="80"></label>
           <label>岗位<input name="role" maxlength="80"></label>
         </div>
-        <label>招聘项目<input name="recruiting_project" maxlength="80" placeholder="如 2027 校园招聘、事业群或专项计划"></label>
-        <div class="form-row">
+        <label class="task-only">招聘项目<input name="recruiting_project" maxlength="80" placeholder="如 2027 校园招聘、事业群或专项计划"></label>
+        <div class="form-row task-only">
           <label>阶段<input name="stage" value="自定义待办" maxlength="40"></label>
           <label>轮次<input name="round" maxlength="30"></label>
         </div>
@@ -113,13 +114,13 @@
           </select></label>
           <label>结果 / 说明<input name="application_result" maxlength="80" placeholder="如：一面未通过"></label>
         </div>
-        <div class="form-row">
+        <div class="form-row task-only">
           <label>开始<input name="start_at" type="datetime-local"></label>
           <label>结束<input name="end_at" type="datetime-local"></label>
         </div>
-        <label>硬截止<input name="deadline_at" type="datetime-local"></label>
+        <label class="task-only">硬截止<input name="deadline_at" type="datetime-local"></label>
         <label>下一步行动<textarea name="action_summary" rows="3" required maxlength="240"></textarea></label>
-        <label>Markdown 手动补充<textarea name="manual_notes" rows="6" maxlength="2000" placeholder="准备材料、问题清单、复盘备注……"></textarea></label>
+        <label class="task-only">Markdown 手动补充<textarea name="manual_notes" rows="6" maxlength="2000" placeholder="准备材料、问题清单、复盘备注……"></textarea></label>
         <div id="formError" class="form-error"></div>
         <div class="dialog-actions">
           <button type="button" id="cancelDialog">取消</button>

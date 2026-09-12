@@ -695,7 +695,7 @@ dialog::backdrop {
   font-size: 9px;
 }
 
-.progress-head > span {
+.progress-head-actions > span {
   padding: 3px 7px;
   border-radius: 8px;
   background: rgba(85, 121, 98, 0.12);
@@ -708,6 +708,29 @@ dialog::backdrop {
   margin: 8px 0 7px;
   font-size: 11px;
   font-weight: 700;
+}
+
+.progress-head-actions {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.progress-edit {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.progress-edit:hover {
+  color: var(--ink);
+}
+
+#taskDialog.application-edit .task-only {
+  display: none;
 }
 
 .progress-action {

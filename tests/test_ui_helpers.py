@@ -277,6 +277,10 @@ def test_card_actions_use_guarded_clicks_and_no_confirm_state() -> None:
     assert '["offered", "已 Offer"]' in javascript
     assert 'return ["offered", "ended"].includes(current) ? current : "active";' in javascript
     assert 'progressFilterState(application) === state.progressFilter' in javascript
+    assert 'showApplicationDialog(application)' in javascript
+    assert 'window.pywebview.api.edit_application(applicationId, formPayload())' in javascript
+    assert 'class="progress-edit">编辑</button>' in javascript
+    assert '#taskDialog.application-edit .task-only' in stylesheet
     assert 'overviewText.textContent = `${allCompanies.size} 家企业 · ${allApplications.length} 条申请链`' in javascript
     assert ".progress-company-state.attention" not in stylesheet
     assert "grid-template-columns: 12px minmax(0, 1fr) max-content" in stylesheet

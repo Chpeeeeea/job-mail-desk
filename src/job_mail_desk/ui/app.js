@@ -763,12 +763,18 @@ function renderProgress() {
       card.innerHTML = `
         <div class="progress-head">
           <div><strong>${escapeHtml(application.role)}</strong><small>${escapeHtml(project)}</small></div>
-          <span>${escapeHtml(application.status_label)}</span>
+          <div class="progress-head-actions">
+            <span>${escapeHtml(application.status_label)}</span>
+            <button type="button" class="progress-edit">编辑</button>
+          </div>
         </div>
         <div class="progress-current">当前：${escapeHtml(application.current_stage)}${escapeHtml(currentRound)}</div>
         ${application.current_action ? `<p class="progress-action">下一步：${escapeHtml(application.current_action)}</p>` : ""}
         <div class="progress-timeline"></div>
       `;
+      card.querySelector(".progress-edit").addEventListener("click", () =>
+        showApplicationDialog(application),
+      );
       const timeline = card.querySelector(".progress-timeline");
       application.history.slice(0, 6).forEach((event) => {
         const row = document.createElement("button");
@@ -813,6 +819,7 @@ function inputDate(value) {
 
 async function showTaskDialog(task = null, focusTime = false) {
   if (apiReady()) await window.pywebview.api.set_editor_mode(true);
+  taskDialog.classList.remove("application-edit");
   taskForm.reset();
   document.querySelector("#formError").textContent = "";
   document.querySelector("#dialogTitle").textContent = task
@@ -820,6 +827,7 @@ async function showTaskDialog(task = null, focusTime = false) {
     : "新建求职任务";
   taskForm.elements.task_id.value = task?.id || "";
   taskForm.elements.unresolved_id.value = "";
+  taskForm.elements.application_id.value = "";
   taskForm.elements.company.value = task?.company || "";
   taskForm.elements.role.value =
     task?.role === "岗位待确认" ? "" : task?.role || "";
@@ -839,11 +847,13 @@ async function showTaskDialog(task = null, focusTime = false) {
 
 async function showUnresolvedDialog(record) {
   if (apiReady()) await window.pywebview.api.set_editor_mode(true);
+  taskDialog.classList.remove("application-edit");
   taskForm.reset();
   document.querySelector("#formError").textContent = "";
   document.querySelector("#dialogTitle").textContent = "编辑并归属";
   taskForm.elements.task_id.value = "";
   taskForm.elements.unresolved_id.value = record.id;
+  taskForm.elements.application_id.value = "";
   taskForm.elements.company.value = record.company || "";
   taskForm.elements.role.value = record.role || "";
   taskForm.elements.recruiting_project.value = record.recruiting_project || "";
@@ -859,6 +869,29 @@ async function showUnresolvedDialog(record) {
   taskForm.elements.manual_notes.value = "";
   taskDialog.showModal();
   taskForm.elements.company.focus();
+}
+
+async function showApplicationDialog(application) {
+  if (apiReady()) await window.pywebview.api.set_editor_mode(true);
+  taskDialog.classList.add("application-edit");
+  taskForm.reset();
+  document.querySelector("#formError").textContent = "";
+  document.querySelector("#dialogTitle").textContent = "编辑申请信息";
+  taskForm.elements.task_id.value = "";
+  taskForm.elements.unresolved_id.value = "";
+  taskForm.elements.application_id.value = application.application_id || "";
+  taskForm.elements.company.value = application.company || "";
+  taskForm.elements.role.value =
+    ["岗位待确认", "[链接已隐藏]"].includes(application.role)
+      ? ""
+      : application.role || "";
+  taskForm.elements.recruiting_project.value = application.project || "";
+  taskForm.elements.application_state.value = "";
+  taskForm.elements.application_result.value = "";
+  taskForm.elements.action_summary.value =
+    application.current_action || "继续跟进该申请";
+  taskDialog.showModal();
+  taskForm.elements.role.focus();
 }
 
 function formPayload() {
@@ -885,6 +918,7 @@ async function saveTask(event) {
   if (!apiReady() || state.saving) return;
   const taskId = taskForm.elements.task_id.value;
   const unresolvedId = taskForm.elements.unresolved_id.value;
+  const applicationId = taskForm.elements.application_id.value;
   const submitButton = taskForm.querySelector("button[type='submit']");
   if (
     taskForm.elements.application_state.value === "ended" &&
@@ -899,6 +933,8 @@ async function saveTask(event) {
   try {
     state.payload = unresolvedId
       ? await window.pywebview.api.resolve_unresolved_new(unresolvedId, formPayload())
+      : applicationId
+        ? await window.pywebview.api.edit_application(applicationId, formPayload())
       : taskId
         ? await window.pywebview.api.edit_task(taskId, formPayload())
         : await window.pywebview.api.create_task(formPayload());
@@ -1230,6 +1266,7 @@ document.querySelector("#expandButton").addEventListener("click", () => setCapsu
 document.querySelector("#closeDialog").addEventListener("click", () => taskDialog.close());
 document.querySelector("#cancelDialog").addEventListener("click", () => taskDialog.close());
 taskDialog.addEventListener("close", () => {
+  taskDialog.classList.remove("application-edit");
   if (apiReady()) window.pywebview.api.set_editor_mode(false);
 });
 taskForm.addEventListener("submit", saveTask);

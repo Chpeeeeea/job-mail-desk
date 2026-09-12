@@ -7,7 +7,9 @@ from .exporter import export_dashboard
 from .markdown_store import MarkdownTaskStore
 from .progress import (
     export_progress,
+    progress_payload,
     sync_task_to_ledger,
+    update_application_in_ledger,
     update_application_status_in_ledger,
 )
 from .research import close_requests_for_task
@@ -148,3 +150,28 @@ def apply_task_update(
             target_store.save(task)
     synced = sync_outputs(settings, target_store, local_dashboard=local_dashboard)
     return {"task": _summary(task), **synced}
+
+
+def apply_application_update(
+    settings: Settings,
+    application_id: str,
+    changes: dict[str, object],
+    *,
+    store: MarkdownTaskStore | None = None,
+    local_dashboard: Path = DASHBOARD_FILE,
+) -> dict[str, object]:
+    """Update one progress-card identity through the authoritative ledger."""
+    target_store = store or MarkdownTaskStore(TASKS_DIR)
+    applications = progress_payload(target_store.all(), settings.progress_source)
+    application = next(
+        (
+            item
+            for item in applications
+            if str(item.get("application_id") or "") == application_id
+        ),
+        None,
+    )
+    if application is None:
+        raise KeyError(f"未找到申请链：{application_id}")
+    update_application_in_ledger(application, settings.progress_source, changes)
+    return sync_outputs(settings, target_store, local_dashboard=local_dashboard)

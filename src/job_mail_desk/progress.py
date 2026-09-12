@@ -485,6 +485,143 @@ def update_application_status_in_ledger(
     return 1
 
 
+def update_application_in_ledger(
+    application: dict[str, object],
+    path: Path | None,
+    changes: dict[str, object],
+) -> int:
+    """Create or update the user-owned ledger row for one progress card."""
+    if not path or not path.exists():
+        raise ValueError("未配置可编辑的岗位投递决策台账。")
+
+    def clean(value: object, limit: int) -> str:
+        return " ".join(redact_text(str(value or "")).replace("｜", "/").split())[:limit]
+
+    company = clean(changes.get("company") or application.get("company"), 80)
+    role = clean(changes.get("role") or application.get("role"), 80)
+    if not company:
+        raise ValueError("公司不能为空。")
+    if not role:
+        raise ValueError("岗位不能为空。")
+
+    application_state = clean(changes.get("application_state"), 20)
+    result = clean(changes.get("application_result"), 80).strip(" ：:·，,")
+    if application_state and application_state not in {
+        "active",
+        "pending",
+        "ended",
+        "offered",
+    }:
+        raise ValueError(f"不支持的申请链状态：{application_state}")
+    if application_state == "ended" and not result:
+        raise ValueError("将申请链设为已结束时，请填写结果或原因。")
+    today = datetime.now(SHANGHAI).date().isoformat()
+    existing_status = clean(
+        application.get("ledger_status")
+        or application.get("current_stage")
+        or application.get("status_label"),
+        120,
+    )
+    status = existing_status
+    if application_state:
+        status = {
+            "active": result or existing_status or "进行中",
+            "pending": result or "待确认",
+            "ended": f"{today} 已结束 · {result}",
+            "offered": f"{today} 已 Offer" + (f" · {result}" if result else ""),
+        }[application_state]
+    action = clean(
+        changes.get("action_summary")
+        if "action_summary" in changes
+        else application.get("ledger_action") or application.get("current_action"),
+        240,
+    )
+
+    content = path.read_text(encoding="utf-8")
+    marker = "### 已投递或已进入流程"
+    if marker not in content:
+        raise ValueError("岗位投递决策台账缺少已投递区。")
+    prefix, section_and_suffix = content.split(marker, 1)
+    if "\n### " in section_and_suffix:
+        section, suffix = section_and_suffix.split("\n### ", 1)
+        suffix = "\n### " + suffix
+    else:
+        section, suffix = section_and_suffix, ""
+
+    marker_id_candidates = [
+        str(value)
+        for value in (
+            application.get("application_key"),
+            application.get("application_id"),
+            application.get("legacy_application_id"),
+        )
+        if value
+    ]
+    marker_ids = set(marker_id_candidates)
+    old_company = _company_key(str(application.get("company") or ""))
+    old_role = str(application.get("role") or "")
+    lines = section.splitlines()
+    candidates: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        if not re.match(r"^- \[[ xX]\] ", line):
+            continue
+        marker_match = APPLICATION_MARKER.search(line)
+        clean_line = APPLICATION_MARKER.sub("", line).rstrip()
+        fields = clean_line.split("] ", 1)[1].split("｜")
+        if len(fields) < 3:
+            continue
+        marker_id = marker_match.group("id") if marker_match else ""
+        row_company, _project = normalize_company_project(
+            re.sub(r"[*_`]", "", fields[0]).strip()
+        )
+        row_role = re.sub(r"[*_`]", "", fields[1]).strip()
+        if marker_id and marker_id in marker_ids:
+            candidates = [(index, marker_id)]
+            break
+        if (
+            not marker_id
+            and _company_key(row_company) == old_company
+            and _same_role(row_role, old_role)
+        ):
+            candidates.append((index, ""))
+
+    stable_id = next(
+        (
+            item
+            for item in marker_id_candidates
+            if APPLICATION_MARKER.fullmatch(
+                f"<!-- jobmaildesk:application:{item} -->"
+            )
+        ),
+        "",
+    )
+    if len(candidates) == 1:
+        index, existing_marker = candidates[0]
+        stable_id = existing_marker or stable_id
+        lines[index] = (
+            f"- [x] {company}｜{role}｜**{status}**｜{action} "
+            f"<!-- jobmaildesk:application:{stable_id} -->"
+        ).rstrip()
+    elif not candidates and stable_id:
+        lines.extend(
+            [
+                "",
+                (
+                    f"- [x] {company}｜{role}｜**{status}**｜{action} "
+                    f"<!-- jobmaildesk:application:{stable_id} -->"
+                ).rstrip(),
+            ]
+        )
+    else:
+        raise ValueError("无法唯一定位对应的申请链，请先确认公司和岗位归属。")
+
+    updated = prefix + marker + "\n".join(lines) + suffix
+    if updated == content:
+        return 0
+    _atomic_write(path, updated)
+    return 1
+
+
 def sync_current_applications_to_ledger(
     tasks: list[JobTask],
     path: Path | None,

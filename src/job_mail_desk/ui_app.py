@@ -53,7 +53,7 @@ from .config import (
     settings_from_payload,
     write_settings,
 )
-from .agent_bridge import apply_task_update, sync_outputs
+from .agent_bridge import apply_application_update, apply_task_update, sync_outputs
 from .credentials import MailCredential, load_credential, save_credential
 from .dictionary_compiler import compile_workbook
 from .identity_dictionaries import load_identity_dictionaries
@@ -687,6 +687,20 @@ class DesktopApi:
     ) -> dict[str, object]:
         store = MarkdownTaskStore(TASKS_DIR)
         apply_task_update(self._settings, task_id, payload, store=store)
+        return self.get_dashboard()
+
+    def edit_application(
+        self,
+        application_id: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        store = MarkdownTaskStore(TASKS_DIR)
+        apply_application_update(
+            self._settings,
+            application_id,
+            payload,
+            store=store,
+        )
         return self.get_dashboard()
 
     def set_capsule(self, compact: bool) -> bool:

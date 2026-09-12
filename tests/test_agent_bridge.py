@@ -2,7 +2,11 @@ from datetime import datetime
 
 import pytest
 
-from job_mail_desk.agent_bridge import apply_task_update, list_tasks
+from job_mail_desk.agent_bridge import (
+    apply_application_update,
+    apply_task_update,
+    list_tasks,
+)
 from job_mail_desk.config import Settings
 from job_mail_desk.markdown_store import MarkdownTaskStore
 from job_mail_desk.models import JobTask
@@ -178,3 +182,56 @@ def test_edit_application_status_can_mark_offer(tmp_path) -> None:
     assert "已 Offer · 已确认录用" in ledger.read_text(encoding="utf-8")
     progress = settings.progress_output.read_text(encoding="utf-8")
     assert "已 Offer · 已确认录用" in progress
+
+
+def test_edit_progress_application_identity_creates_authoritative_ledger_row(
+    tmp_path,
+) -> None:
+    store = MarkdownTaskStore(tmp_path / "tasks")
+    task = sample_task()
+    task.company = "Babycare"
+    task.role = "岗位待确认"
+    task.application_key = "app-1234567890abcdef1234"
+    store.save(task)
+    ledger = tmp_path / "岗位投递决策台账.md"
+    ledger.write_text(
+        "### 已投递或已进入流程\n\n### 当前优先待投\n",
+        encoding="utf-8",
+    )
+    settings = Settings(
+        progress_enabled=True,
+        progress_output=tmp_path / "求职当前进展.md",
+        progress_source=ledger,
+    )
+
+    apply_application_update(
+        settings,
+        task.application_key,
+        {
+            "company": "Babycare",
+            "role": "产品经理",
+            "action_summary": "等待 AI 面试结果",
+        },
+        store=store,
+        local_dashboard=tmp_path / "dashboard.md",
+    )
+
+    content = ledger.read_text(encoding="utf-8")
+    assert "Babycare｜产品经理" in content
+    assert "等待 AI 面试结果" in content
+    assert task.application_key in content
+
+    apply_application_update(
+        settings,
+        task.application_key,
+        {
+            "company": "Babycare",
+            "role": "互联网产品经理",
+            "action_summary": "等待后续",
+        },
+        store=store,
+        local_dashboard=tmp_path / "dashboard.md",
+    )
+    updated = ledger.read_text(encoding="utf-8")
+    assert "Babycare｜互联网产品经理" in updated
+    assert updated.count(task.application_key) == 1
